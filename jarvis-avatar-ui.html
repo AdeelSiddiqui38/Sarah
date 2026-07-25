@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Rencho Avatar UI — Prototype</title>
+<title>Rencho</title>
 <style>
   :root{
     --bg:#05070d;
@@ -104,7 +104,25 @@
 
   ::-webkit-scrollbar{width:6px;}
   ::-webkit-scrollbar-thumb{background:#1c2436;border-radius:3px;}
+
+  /* ---- Composer (type / paste / attach) ---- */
+  .composer{display:flex;flex-direction:column;gap:8px;}
+  .composer-row{display:flex;align-items:flex-end;gap:8px;}
+  #composerInput{flex:1;resize:none;min-height:38px;max-height:140px;padding:9px 11px;border-radius:10px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;font-family:inherit;line-height:1.4;}
+  #composerInput:focus{outline:none;border-color:var(--accent-dim);}
+  .composer-btn{flex:none;width:38px;height:38px;border-radius:10px;border:1px solid var(--panel-border);background:#0e1320;color:var(--accent);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+  .composer-btn:hover{border-color:var(--accent);}
+  .composer-btn.send{background:radial-gradient(circle at 30% 30%, #16324a, #0b0f1a);}
+  .attach-preview{display:flex;flex-wrap:wrap;gap:6px;}
+  .attach-preview:empty{display:none;}
+  .attach-chip{display:flex;align-items:center;gap:6px;background:#0e1320;border:1px solid var(--panel-border);border-radius:8px;padding:4px 8px;font-size:11px;max-width:170px;}
+  .attach-chip img{width:22px;height:22px;object-fit:cover;border-radius:4px;flex:none;}
+  .attach-chip .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .attach-chip .rm{cursor:pointer;color:var(--warn);font-weight:bold;flex:none;}
+  .composer-hint{font-size:10px;color:var(--text-dim);}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 </head>
 <body>
 <div id="app">
@@ -118,7 +136,7 @@
 
   <div class="hud">
     <div class="topbar">
-      <div class="brand"><span class="dot"></span> RENCHO UI — PROTOTYPE</div>
+      <div class="brand"><span class="dot"></span> RENCHO</div>
       <div class="status-pill" id="statusPill"><span class="ring" id="statusRing"></span><span id="statusText">Idle</span></div>
       <div class="topbar-right">
         <span class="uptime" id="uptime">uptime 00:00:00</span>
@@ -140,19 +158,21 @@
         </div>
       </div>
       <div class="panel">
-        <h3>Demo State Controls</h3>
-        <div class="chips">
-          <button class="chip" data-state="idle">Idle</button>
-          <button class="chip" data-state="listening">Listening</button>
-          <button class="chip" data-state="thinking">Thinking</button>
-          <button class="chip" data-state="speaking">Speaking</button>
-          <button class="chip" data-state="acting">Acting</button>
-          <button class="chip" data-state="warning">Warning</button>
+        <h3>Talk to Rencho</h3>
+        <div class="composer">
+          <div class="attach-preview" id="attachPreview"></div>
+          <div class="composer-row">
+            <textarea id="composerInput" rows="1" placeholder="Type a message, or paste/attach an image or doc…"></textarea>
+            <button class="composer-btn" id="attachBtn" title="Attach image or document">📎</button>
+            <button class="composer-btn send" id="composerSend" title="Send (Enter)">➤</button>
+          </div>
+          <div class="composer-hint">Enter to send · Shift+Enter for a new line · paste screenshots directly</div>
+          <input type="file" id="attachInput" accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.py,.html,.log" multiple hidden>
         </div>
       </div>
     </div>
 
-    <div class="rail rail-right">
+    <div class="rail rail-right" style="display:none;">
       <div class="panel">
         <h3>Active Tasks</h3>
         <div id="taskList" style="display:flex;flex-direction:column;gap:8px;"></div>
@@ -617,10 +637,126 @@ document.getElementById('rejectBtn').addEventListener('click', () => {
   pendingAction = null;
 });
 
-/* ============ Demo state buttons ============ */
-document.querySelectorAll('.chip[data-state]').forEach(btn => {
-  btn.addEventListener('click', () => setState(btn.dataset.state));
+/* ============ Composer: type / paste / attach to talk to Rencho ============ */
+let pendingAttachments = []; // transient — never persisted (base64 stays out of localStorage)
+const composerInput = document.getElementById('composerInput');
+const attachBtn = document.getElementById('attachBtn');
+const composerSend = document.getElementById('composerSend');
+const attachInput = document.getElementById('attachInput');
+const attachPreview = document.getElementById('attachPreview');
+
+function renderAttachPreview() {
+  attachPreview.innerHTML = pendingAttachments.map((a, i) =>
+    `<span class="attach-chip">${a.thumb ? `<img src="${a.thumb}" alt="">` : '📄'}<span class="name">${a.name}</span><span class="rm" data-i="${i}" title="Remove">✕</span></span>`
+  ).join('');
+  attachPreview.querySelectorAll('.rm').forEach(el =>
+    el.addEventListener('click', () => { pendingAttachments.splice(+el.dataset.i, 1); renderAttachPreview(); }));
+}
+
+// Images are downscaled to a sane max dimension and re-encoded as JPEG so the
+// request stays small and within the vision models' limits.
+function fileToImageAttachment(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const maxDim = 1568;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      const scale = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = c.toDataURL('image/jpeg', 0.85);
+      resolve({ kind: 'image', mediaType: 'image/jpeg', data: dataUrl.split(',')[1], name: file.name || 'image.jpg', thumb: dataUrl });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+    img.src = url;
+  });
+}
+
+async function fileToTextAttachment(file) {
+  const t = await file.text();
+  return { kind: 'text', text: t.slice(0, 20000), name: file.name || 'file.txt' };
+}
+
+async function fileToPdfAttachment(file) {
+  if (!window.pdfjsLib) { toast('PDF reader still loading — try again in a moment', true); return { kind: 'text', text: '(PDF could not be read)', name: file.name }; }
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = '';
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    text += content.items.map(it => it.str).join(' ') + '\n';
+  }
+  return { kind: 'text', text: text.slice(0, 40000), name: file.name };
+}
+
+async function ingestFile(file) {
+  const type = file.type || '';
+  const name = (file.name || 'file').toLowerCase();
+  let att;
+  if (type.startsWith('image/')) att = await fileToImageAttachment(file);
+  else if (type === 'application/pdf' || name.endsWith('.pdf')) att = await fileToPdfAttachment(file);
+  else att = await fileToTextAttachment(file);
+  pendingAttachments.push(att);
+  renderAttachPreview();
+}
+
+attachBtn.addEventListener('click', () => attachInput.click());
+attachInput.addEventListener('change', async () => {
+  for (const f of Array.from(attachInput.files)) {
+    try { await ingestFile(f); } catch (e) { toast('Could not read ' + (f.name || 'file'), true); }
+  }
+  attachInput.value = '';
 });
+composerInput.addEventListener('paste', async (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.kind === 'file' && (it.type || '').startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) { try { await ingestFile(f); } catch (_) {} }
+    }
+  }
+});
+composerInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComposer(); }
+});
+composerInput.addEventListener('input', () => {
+  composerInput.style.height = 'auto';
+  composerInput.style.height = Math.min(composerInput.scrollHeight, 140) + 'px';
+});
+composerSend.addEventListener('click', sendComposer);
+
+async function sendComposer() {
+  const text = composerInput.value.trim();
+  const attachments = pendingAttachments.slice();
+  if (!text && !attachments.length) return;
+  composerInput.value = '';
+  composerInput.style.height = 'auto';
+  pendingAttachments = [];
+  renderAttachPreview();
+
+  const badge = attachments.length ? `  📎×${attachments.length}` : '';
+  addMsg('user', (text || `(sent ${attachments.length} attachment${attachments.length > 1 ? 's' : ''})`) + badge);
+
+  // A staged GitHub write is resolved by a typed yes/no — no AI call, no attachment path.
+  if (pendingGithubAction && !attachments.length) {
+    const action = pendingGithubAction; pendingGithubAction = null;
+    if (isAffirmative(text)) { setState('thinking'); runConfirmedGithubAction(action); }
+    else { const m = "Okay, cancelled — I won't do that."; setState('speaking'); addMsg('assistant', m); speak(m, { continueConversation: false }); }
+    return;
+  }
+  // Local fast-path actions (open/search/play) only make sense for plain text.
+  if (!attachments.length) {
+    const actionReply = tryHandleAction(text);
+    if (actionReply) { setState('speaking'); addMsg('assistant', actionReply); speak(actionReply, { continueConversation: false }); return; }
+  }
+  setState('thinking');
+  sendToBrain(text || '(see attached)', attachments, { viaText: true });
+}
 
 /* ============ Settings / config (API key, system prompt, voice) ============ */
 const CONFIG_KEY = 'brain_config_v1';
@@ -883,12 +1019,45 @@ function pushMessage(role, content) {
   saveConfig(config);
 }
 
-async function callAnthropic(apiKey, { tools } = {}) {
+// Builds the messages array for an API call. Normally this is just the plain
+// text conversation; when the current turn has attachments, the LAST user
+// message is rebuilt as a multimodal block list (images + extracted doc text)
+// in the shape the given provider expects. Attachments are never stored in
+// `conversation` itself, so history stays small and localStorage-safe.
+function buildUserContentBlocks(provider, text, attachments) {
+  const imgs = attachments.filter(a => a.kind === 'image');
+  const docs = attachments.filter(a => a.kind === 'text');
+  const docText = docs.map(d => `\n\n[Attached file: ${d.name}]\n${d.text}`).join('');
+  const combined = (text || '') + docText || '(see attached)';
+  if (provider === 'openai') {
+    const content = [{ type: 'text', text: combined }];
+    imgs.forEach(im => content.push({ type: 'image_url', image_url: { url: `data:${im.mediaType};base64,${im.data}` } }));
+    return content;
+  }
+  // anthropic — images first, then text
+  const content = imgs.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: im.data } }));
+  content.push({ type: 'text', text: combined });
+  return content;
+}
+
+function apiMessages(provider, attachments) {
+  if (!attachments || !attachments.length) return conversation;
+  const msgs = conversation.map(m => ({ role: m.role, content: m.content }));
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user') {
+      msgs[i] = { role: 'user', content: buildUserContentBlocks(provider, msgs[i].content, attachments) };
+      break;
+    }
+  }
+  return msgs;
+}
+
+async function callAnthropic(apiKey, { tools, attachments } = {}) {
   const body = {
     model: config.model || 'claude-sonnet-5',
     max_tokens: 400,
     system: buildSystemPrompt(),
-    messages: conversation
+    messages: apiMessages('anthropic', attachments)
   };
   if (tools) body.tools = tools;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -913,7 +1082,7 @@ async function callAnthropic(apiKey, { tools } = {}) {
   return { text: text || '(empty response)', toolCall };
 }
 
-async function callOpenAI(apiKey, { tools } = {}) {
+async function callOpenAI(apiKey, { tools, attachments } = {}) {
   // OpenAI's API has no CORS support, so a browser page can never call it
   // directly (Anthropic's API is the exception). This goes through the
   // local Rencho server instead, which makes the actual OpenAI call
@@ -925,7 +1094,7 @@ async function callOpenAI(apiKey, { tools } = {}) {
     max_tokens: 400,
     messages: [
       { role: 'system', content: buildSystemPrompt() },
-      ...conversation
+      ...apiMessages('openai', attachments)
     ]
   };
   if (tools) payload.tools = tools;
@@ -950,7 +1119,7 @@ async function callOpenAI(apiKey, { tools } = {}) {
   return { text: text || '(empty response)', toolCall };
 }
 
-async function sendToBrain(userText) {
+async function sendToBrain(userText, attachments = [], opts = {}) {
   pushMessage('user', userText);
 
   const provider = config.provider === 'openai' ? 'openai' : 'anthropic';
@@ -969,8 +1138,8 @@ async function sendToBrain(userText) {
   try {
     const tools = config.githubToken ? githubToolFor(provider) : null;
     const { text: rawText, toolCall } = provider === 'openai'
-      ? await callOpenAI(apiKey, { tools })
-      : await callAnthropic(apiKey, { tools });
+      ? await callOpenAI(apiKey, { tools, attachments })
+      : await callAnthropic(apiKey, { tools, attachments });
     console.log('[Rencho raw reply]', rawText, toolCall); // temporary debug aid
 
     let replyText;
@@ -986,7 +1155,9 @@ async function sendToBrain(userText) {
     pushMessage('assistant', replyText);
     setState('speaking');
     addMsg('assistant', replyText);
-    speak(replyText); // continueConversation defaults to true — keeps the mic open for a follow-up
+    // Voice turns keep the mic open for a natural follow-up; typed turns don't
+    // force the mic back on (the user is at the keyboard, not talking).
+    speak(replyText, { continueConversation: !opts.viaText });
   } catch (err) {
     console.error(err);
     toast(`${providerLabel} request failed: ` + err.message, true);
