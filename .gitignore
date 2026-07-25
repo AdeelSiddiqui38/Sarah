@@ -1,0 +1,12 @@
+# Large / re-downloadable Vosk speech model (fetched via requirements + setup)
+model/
+model.zip
+
+# Runtime + scratch artifacts
+*.log
+__pycache__/
+*.pyc
+
+# Icon design scratch renders
+_preview*.png
+_sanity_check.png

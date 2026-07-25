@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rencho Avatar UI — Prototype</title>
+<style>
+  :root{
+    --bg:#05070d;
+    --panel:#0b0f1a;
+    --panel-border:#1c2436;
+    --text:#dbe4f3;
+    --text-dim:#7c8aa5;
+    --accent:#3ad6ff;
+    --accent-dim:#1c5f75;
+    --warn:#ffb020;
+    --danger:#ff4d5e;
+    --ok:#2ecc71;
+    --thinking:#a78bfa;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;overflow:hidden;}
+  #app{position:relative;width:100vw;height:100vh;}
+  #scene{position:absolute;inset:0;display:block;}
+
+  .hud{position:absolute;inset:0;pointer-events:none;display:grid;grid-template-columns:300px 1fr 320px;grid-template-rows:64px 1fr 110px;gap:0;}
+
+  .topbar{grid-column:1/4;grid-row:1;display:flex;align-items:center;justify-content:space-between;padding:0 20px;pointer-events:auto;background:linear-gradient(180deg, rgba(5,7,13,.9), rgba(5,7,13,0));backdrop-filter:blur(2px);}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:.08em;font-size:13px;color:var(--text-dim);text-transform:uppercase;}
+  .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);}
+  .status-pill{display:flex;align-items:center;gap:8px;padding:6px 14px;border-radius:20px;border:1px solid var(--panel-border);background:var(--panel);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);transition:all .3s ease;}
+  .status-pill .ring{width:10px;height:10px;border-radius:50%;background:var(--text-dim);transition:all .3s ease;}
+  .topbar-right{display:flex;align-items:center;gap:14px;}
+  .uptime{font-size:11px;color:var(--text-dim);font-family:'Consolas',monospace;}
+  .icon-btn{pointer-events:auto;width:34px;height:34px;border-radius:8px;border:1px solid var(--panel-border);background:var(--panel);color:var(--text-dim);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;transition:all .2s;}
+  .icon-btn:hover{color:var(--accent);border-color:var(--accent-dim);}
+  .icon-btn.active{color:var(--danger);border-color:var(--danger);}
+
+  .rail{pointer-events:auto;padding:14px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;}
+  .rail-left{grid-column:1;grid-row:2/4;}
+  .rail-right{grid-column:3;grid-row:2/4;}
+
+  .panel{background:var(--panel);border:1px solid var(--panel-border);border-radius:12px;padding:14px;}
+  .panel h3{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);font-weight:600;}
+
+  .transcript{flex:1;min-height:200px;display:flex;flex-direction:column;}
+  .transcript-feed{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;max-height:38vh;padding-right:4px;}
+  .msg{font-size:13px;line-height:1.4;padding:8px 10px;border-radius:8px;max-width:100%;}
+  .msg.user{background:#12203a;color:#cfe8ff;align-self:flex-end;border:1px solid #1e3a5f;}
+  .msg.assistant{background:#141824;color:var(--text);align-self:flex-start;border:1px solid var(--panel-border);}
+  .msg .who{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);display:block;margin-bottom:3px;}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+  .chip{pointer-events:auto;border:1px solid var(--panel-border);background:#101522;color:var(--text);font-size:12px;padding:6px 12px;border-radius:16px;cursor:pointer;transition:all .2s;}
+  .chip:hover{border-color:var(--accent);color:var(--accent);}
+  .chip.risky{border-color:#5a2330;color:#ffb3ba;}
+  .chip.risky:hover{border-color:var(--danger);color:var(--danger);}
+
+  .task{background:#0e1320;border:1px solid var(--panel-border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;}
+  .task-top{display:flex;justify-content:space-between;align-items:center;font-size:12px;}
+  .task-label{color:var(--text);font-weight:500;}
+  .task-status{font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:10px;}
+  .task-status.running{color:var(--accent);background:rgba(58,214,255,.12);}
+  .task-status.done{color:var(--ok);background:rgba(46,204,113,.12);}
+  .task-status.pending{color:var(--warn);background:rgba(255,176,32,.12);}
+  .task-status.failed{color:var(--danger);background:rgba(255,77,94,.12);}
+  .progress{height:4px;border-radius:3px;background:#1c2436;overflow:hidden;}
+  .progress-bar{height:100%;background:var(--accent);width:0%;transition:width .3s linear;}
+
+  .stat-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 0;border-bottom:1px solid var(--panel-border);}
+  .stat-row:last-child{border-bottom:none;}
+  .stat-row .num{font-weight:600;color:var(--accent);font-family:'Consolas',monospace;}
+
+  .memory-line{font-size:12px;color:var(--text-dim);line-height:1.5;padding:3px 0;}
+
+  .bottombar{grid-column:1/4;grid-row:3;display:flex;align-items:center;justify-content:center;pointer-events:none;padding-bottom:18px;}
+  .mic-wrap{pointer-events:auto;display:flex;flex-direction:column;align-items:center;gap:8px;}
+  .mic-btn{width:64px;height:64px;border-radius:50%;border:2px solid var(--accent-dim);background:radial-gradient(circle at 30% 30%, #16324a, #0b0f1a);color:var(--accent);font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .25s;box-shadow:0 0 0 rgba(58,214,255,0);}
+  .mic-btn:hover{border-color:var(--accent);}
+  .mic-btn.live{border-color:var(--accent);box-shadow:0 0 24px rgba(58,214,255,.45);animation:pulse 1.4s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 12px rgba(58,214,255,.3);}50%{box-shadow:0 0 30px rgba(58,214,255,.6);}}
+  .mic-hint{font-size:11px;color:var(--text-dim);letter-spacing:.04em;}
+
+  .center-label{position:absolute;top:78px;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none;}
+  .center-label .name{font-size:13px;letter-spacing:.15em;text-transform:uppercase;color:var(--text-dim);}
+  .center-label .state{font-size:22px;font-weight:600;color:var(--accent);text-transform:capitalize;transition:color .3s;margin-top:2px;}
+  .center-label .zoom-hint{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);opacity:.55;margin-top:6px;}
+
+  .modal{position:absolute;inset:0;background:rgba(3,4,8,.72);display:flex;align-items:center;justify-content:center;pointer-events:auto;z-index:50;transition:opacity .2s;}
+  .modal.hidden{display:none;}
+  .modal-card{width:380px;background:var(--panel);border:1px solid var(--panel-border);border-radius:14px;padding:22px;text-align:center;}
+  .modal-card .icon{width:44px;height:44px;border-radius:50%;background:rgba(255,176,32,.12);color:var(--warn);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:20px;}
+  .modal-card h4{margin:0 0 8px;font-size:16px;}
+  .modal-card p{margin:0 0 20px;font-size:13px;color:var(--text-dim);line-height:1.5;}
+  .modal-actions{display:flex;gap:10px;justify-content:center;}
+  .btn{pointer-events:auto;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;}
+  .btn-approve{background:var(--ok);color:#04150a;}
+  .btn-reject{background:#241419;color:var(--danger);border:1px solid #5a2330;}
+
+  #toastContainer{position:absolute;bottom:100px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:60;pointer-events:none;}
+  .toast{background:var(--panel);border:1px solid var(--panel-border);border-left:3px solid var(--ok);padding:10px 14px;border-radius:8px;font-size:12px;min-width:220px;animation:slidein .25s ease;box-shadow:0 8px 24px rgba(0,0,0,.4);}
+  .toast.warn{border-left-color:var(--warn);}
+  @keyframes slidein{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
+
+  ::-webkit-scrollbar{width:6px;}
+  ::-webkit-scrollbar-thumb{background:#1c2436;border-radius:3px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+
+  <div class="center-label">
+    <div class="name">ASSISTANT</div>
+    <div class="state" id="stateLabel">Idle</div>
+    <div class="zoom-hint">scroll / pinch to zoom</div>
+  </div>
+
+  <div class="hud">
+    <div class="topbar">
+      <div class="brand"><span class="dot"></span> RENCHO UI — PROTOTYPE</div>
+      <div class="status-pill" id="statusPill"><span class="ring" id="statusRing"></span><span id="statusText">Idle</span></div>
+      <div class="topbar-right">
+        <span class="uptime" id="uptime">uptime 00:00:00</span>
+        <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
+        <button class="icon-btn" id="muteBtn" title="Mute">🔇</button>
+        <button class="icon-btn" id="interruptBtn" title="Interrupt">⏹</button>
+      </div>
+    </div>
+
+    <div class="rail rail-left">
+      <div class="panel transcript">
+        <h3>Transcript</h3>
+        <div class="transcript-feed" id="feed"></div>
+        <div class="chips">
+          <button class="chip" data-action="draft">Draft</button>
+          <button class="chip risky" data-action="send">Send</button>
+          <button class="chip" data-action="reschedule">Reschedule</button>
+          <button class="chip" data-action="summarize">Summarize</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Demo State Controls</h3>
+        <div class="chips">
+          <button class="chip" data-state="idle">Idle</button>
+          <button class="chip" data-state="listening">Listening</button>
+          <button class="chip" data-state="thinking">Thinking</button>
+          <button class="chip" data-state="speaking">Speaking</button>
+          <button class="chip" data-state="acting">Acting</button>
+          <button class="chip" data-state="warning">Warning</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="rail rail-right">
+      <div class="panel">
+        <h3>Active Tasks</h3>
+        <div id="taskList" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+      <div class="panel">
+        <h3>Status</h3>
+        <div class="stat-row"><span>Calendar today</span><span class="num" id="calStat">3 meetings</span></div>
+        <div class="stat-row"><span>Inbox</span><span class="num" id="inboxStat">12 unread</span></div>
+        <div class="stat-row"><span>Connection</span><span class="num" id="connectionStat" style="color:var(--warn)">No API key</span></div>
+      </div>
+      <div class="panel">
+        <h3>Session Memory</h3>
+        <div class="memory-line">• Prefers concise, direct responses</div>
+        <div class="memory-line">• Timezone: local</div>
+        <div class="memory-line">• Approval required for send/financial actions</div>
+      </div>
+    </div>
+
+    <div class="bottombar">
+      <div class="mic-wrap">
+        <button class="mic-btn" id="micBtn" title="Tap to talk">🎙</button>
+        <span class="mic-hint" id="micHint">Tap to talk · hold for manual</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="approvalModal">
+    <div class="modal-card">
+      <div class="icon">⚠</div>
+      <h4>Approval Required</h4>
+      <p id="approvalText">This action will send a message on your behalf. Approve to continue.</p>
+      <div class="modal-actions">
+        <button class="btn btn-reject" id="rejectBtn">Reject</button>
+        <button class="btn btn-approve" id="approveBtn">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="settingsModal">
+    <div class="modal-card" style="width:420px;text-align:left;">
+      <h4 style="text-align:center;">Rencho Settings</h4>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">AI Provider</label>
+      <select id="providerSelect"
+        style="width:100%;margin:6px 0 14px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
+        <option value="anthropic">Claude (Anthropic)</option>
+        <option value="openai">ChatGPT (OpenAI)</option>
+      </select>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;" id="apiKeyLabel">Anthropic API Key</label>
+      <input type="password" id="apiKeyInput" placeholder="sk-ant-..." autocomplete="off"
+        style="width:100%;margin:6px 0 14px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
+      <div id="openaiModelRow" style="display:none;">
+        <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">OpenAI Model</label>
+        <input type="text" id="openaiModelInput" placeholder="gpt-4o-mini" autocomplete="off"
+          style="width:100%;margin:6px 0 4px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
+        <p style="font-size:11px;color:var(--text-dim);margin:0 0 14px;line-height:1.5;">If you get a "does not have access to model" error, your OpenAI project has that model restricted — check platform.openai.com project settings for which models are enabled, then type an allowed one here (e.g. gpt-4o, gpt-3.5-turbo).</p>
+      </div>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">System Prompt</label>
+      <textarea id="systemPromptInput" rows="3"
+        style="width:100%;margin:6px 0 14px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;resize:vertical;"></textarea>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">Voice</label>
+      <select id="voiceSelect"
+        style="width:100%;margin:6px 0 14px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;"></select>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">What Rencho Remembers</label>
+      <textarea id="memoryNotesInput" rows="4" placeholder="Builds up automatically as you talk — say &quot;remember that ...&quot; anytime, or edit this list directly."
+        style="width:100%;margin:6px 0 4px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;resize:vertical;"></textarea>
+      <div style="display:flex;justify-content:flex-end;margin:0 0 14px;">
+        <button type="button" class="btn btn-reject" id="clearMemoryBtn" style="padding:4px 10px;font-size:11px;">Clear memory &amp; history</button>
+      </div>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">GitHub Personal Access Token</label>
+      <input type="password" id="githubTokenInput" placeholder="ghp_..." autocomplete="off"
+        style="width:100%;margin:6px 0 4px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
+      <p style="font-size:11px;color:var(--text-dim);margin:0 0 14px;line-height:1.5;">Reads/writes to your repos by voice once set. Rencho will always ask "yes" before it actually creates, edits, or pushes anything — it never does a write silently.</p>
+      <p style="font-size:11px;color:var(--text-dim);margin:0 0 16px;line-height:1.5;">Your key is saved only in this browser (localStorage) and sent directly from your browser to the provider's API — it never passes through me or any other server. Paste it yourself; I won't ask for it.</p>
+      <div class="modal-actions">
+        <button class="btn btn-reject" id="settingsCloseBtn">Close</button>
+        <button class="btn btn-approve" id="settingsSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastContainer"></div>
+</div>
+
+<script>
+/* ============ HUD AVATAR — JARVIS-style radial dashboard, always-rotating, zoomable ============ */
+const canvas = document.getElementById('scene');
+const ctx2d = canvas.getContext('2d');
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+function resizeAll() {
+  canvas.width = Math.floor(window.innerWidth * DPR);
+  canvas.height = Math.floor(window.innerHeight * DPR);
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+}
+resizeAll();
+window.addEventListener('resize', resizeAll);
+
+// ---- zoom state (scroll wheel + pinch) ----
+const ZOOM_MIN = 0.55;
+const ZOOM_MAX = 2.4;
+let hudZoom = 1;
+let hudZoomTarget = 1;
+
+window.addEventListener('wheel', (e) => {
+  hudZoomTarget = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, hudZoomTarget - e.deltaY * 0.0012));
+}, { passive: true });
+
+let lastPinchDist = null;
+window.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+    if (lastPinchDist != null) {
+      hudZoomTarget = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, hudZoomTarget + (dist - lastPinchDist) * 0.003));
+    }
+    lastPinchDist = dist;
+  }
+}, { passive: true });
+window.addEventListener('touchend', () => { lastPinchDist = null; });
+
+/* ============ STATE MACHINE ============ */
+const STATE_COLORS = {
+  idle:      '#3ad6ff',
+  listening: '#3ad6ff',
+  thinking:  '#a78bfa',
+  speaking:  '#4ee8c3',
+  acting:    '#3ad6ff',
+  warning:   '#ff4d5e',
+};
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const STATE_RGB = Object.fromEntries(Object.entries(STATE_COLORS).map(([k, v]) => [k, hexToRgb(v)]));
+
+let currentState = 'idle';
+let audioLevel = 0;
+let fakeMouthPhase = 0;
+let currentRgb = STATE_RGB.idle.slice();
+let targetRgb = STATE_RGB.idle.slice();
+
+// Declared early (TDZ-safe) so setState() can reference them before the
+// wake-word listener itself is defined further down the script.
+let wakeModeWanted = false;
+let wakeRecognition = null;
+
+function setState(state) {
+  if (!STATE_COLORS[state]) return;
+  currentState = state;
+  document.getElementById('stateLabel').textContent = state.charAt(0).toUpperCase() + state.slice(1);
+  document.getElementById('statusText').textContent = state.charAt(0).toUpperCase() + state.slice(1);
+  document.getElementById('statusRing').style.background = STATE_COLORS[state];
+  document.getElementById('statusRing').style.boxShadow = `0 0 8px ${STATE_COLORS[state]}`;
+  targetRgb = STATE_RGB[state].slice();
+  document.getElementById('micBtn').classList.toggle('live', state === 'listening');
+
+  // Wake-word mic must yield the microphone to command capture whenever
+  // we're not idle, and resume listening for "Rencho" once we're back.
+  if (wakeRecognition) {
+    if (state !== 'idle') {
+      try { wakeRecognition.stop(); } catch (e) { /* not running */ }
+    } else if (wakeModeWanted) {
+      try { wakeRecognition.start(); } catch (e) { /* already running */ }
+    }
+  }
+}
+
+/* ============ AGENT CONSTELLATION — APEX-style labeled nodes around the core ============ */
+const AGENTS = [
+  { label: 'Strategist',    gold: false },
+  { label: 'Researcher',    gold: false },
+  { label: 'Chief of Staff',gold: false },
+  { label: 'Finance',       gold: false },
+  { label: 'Editor',        gold: false },
+  { label: 'Memory',        gold: false },
+  { label: 'Sales',         gold: true  },
+  { label: 'Marketing',     gold: true  },
+  { label: 'Design',        gold: false },
+  { label: 'Culture',       gold: false },
+].map((a, i, arr) => ({ ...a, angle: (i / arr.length) * Math.PI * 2 - Math.PI / 2, wobble: Math.random() * Math.PI * 2 }));
+
+const GOLD = [230, 170, 60];
+
+/* ============ ANIMATION LOOP ============ */
+// Rotation never stops — speed just shifts with state, so the avatar always reads as "live".
+const ROT_SPEED = { idle: 0.35, listening: 0.5, thinking: 1.2, speaking: 0.6, acting: 0.8, warning: 1.6 };
+
+let hudT = 0, lastFrameTime = performance.now();
+let haloSweep = 0, constellationDrift = 0;
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+  lastFrameTime = now;
+  hudT += dt;
+
+  // smooth zoom + color lerp
+  hudZoom += (hudZoomTarget - hudZoom) * Math.min(dt * 6, 1);
+  const lerpT = Math.min(dt * 4, 1);
+  currentRgb = currentRgb.map((c, i) => c + (targetRgb[i] - c) * lerpT);
+  const [r, g, b] = currentRgb.map(Math.round);
+  const col = `rgb(${r},${g},${b})`;
+  const colA = (a) => `rgba(${r},${g},${b},${a})`;
+
+  const speedMul = ROT_SPEED[currentState] ?? 0.35;
+  haloSweep += dt * 0.4 * speedMul;
+  constellationDrift += dt * 0.05 * speedMul;
+
+  // core scale per state
+  let coreScale = 1;
+  if (currentState === 'idle') {
+    coreScale = 1 + Math.sin(hudT * 1.1) * 0.03; // breathing
+  } else if (currentState === 'listening') {
+    coreScale = 1 + audioLevel * 0.4 + Math.sin(hudT * 6) * 0.015;
+  } else if (currentState === 'thinking') {
+    coreScale = 1 + Math.sin(hudT * 3) * 0.05;
+  } else if (currentState === 'speaking') {
+    fakeMouthPhase += dt * 10;
+    coreScale = 1 + Math.abs(Math.sin(fakeMouthPhase)) * 0.12;
+  } else if (currentState === 'acting') {
+    coreScale = 1 + Math.sin(hudT * 2) * 0.07;
+  } else if (currentState === 'warning') {
+    coreScale = 1 + Math.abs(Math.sin(hudT * 8)) * 0.1;
+  }
+
+  draw(col, colA, coreScale);
+}
+
+function draw(col, colA, coreScale) {
+  ctx2d.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx2d.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2 + 30;
+
+  ctx2d.save();
+  ctx2d.translate(cx, cy);
+  ctx2d.scale(hudZoom, hudZoom);
+
+  const coreR = 46 * coreScale;
+  const haloR = 62 * coreScale;
+  const constellationR = 230;
+
+  // ---- flowing background wave-lines (drawn in screen space, before the translate scale-up reads oddly, so draw relative to core but wide) ----
+  ctx2d.save();
+  ctx2d.globalAlpha = 0.55;
+  for (let i = 0; i < 3; i++) {
+    const phase = hudT * (0.12 + i * 0.05) + i * 2.1;
+    const yOff = (i - 1) * 90;
+    ctx2d.strokeStyle = colA(0.12);
+    ctx2d.lineWidth = 1.5;
+    ctx2d.beginPath();
+    for (let x = -520; x <= 520; x += 20) {
+      const y = yOff + Math.sin(x * 0.012 + phase) * 40 + Math.sin(x * 0.004 - phase * 0.6) * 30;
+      if (x === -520) ctx2d.moveTo(x, y); else ctx2d.lineTo(x, y);
+    }
+    ctx2d.stroke();
+  }
+  ctx2d.restore();
+
+  // ---- agent constellation: connector lines + labeled nodes ----
+  AGENTS.forEach(agent => {
+    const wobble = Math.sin(hudT * 0.3 + agent.wobble) * 6;
+    const angle = agent.angle + constellationDrift;
+    const r = constellationR + wobble;
+    const nx = Math.cos(angle) * r;
+    const ny = Math.sin(angle) * r;
+    const edgeX = Math.cos(angle) * (haloR + 6);
+    const edgeY = Math.sin(angle) * (haloR + 6);
+
+    const dotA = agent.gold ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.95)` : colA(0.9);
+    const lineA = agent.gold ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.35)` : colA(0.28);
+
+    // connector line, slight elbow toward the node
+    ctx2d.strokeStyle = lineA;
+    ctx2d.lineWidth = 1;
+    ctx2d.beginPath();
+    ctx2d.moveTo(edgeX, edgeY);
+    ctx2d.lineTo(nx * 0.9, ny * 0.9);
+    ctx2d.lineTo(nx, ny);
+    ctx2d.stroke();
+
+    // node dot with glow
+    ctx2d.save();
+    ctx2d.shadowColor = dotA;
+    ctx2d.shadowBlur = 8;
+    ctx2d.fillStyle = dotA;
+    ctx2d.beginPath();
+    ctx2d.arc(nx, ny, 4, 0, Math.PI * 2);
+    ctx2d.fill();
+    ctx2d.restore();
+
+    // label, anchored away from center so text reads outward
+    const rightSide = Math.cos(angle) >= 0;
+    ctx2d.fillStyle = agent.gold ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.9)` : colA(0.85);
+    ctx2d.font = '11px Consolas, monospace';
+    ctx2d.textAlign = rightSide ? 'left' : 'right';
+    ctx2d.textBaseline = 'middle';
+    ctx2d.fillText(agent.label, nx + (rightSide ? 10 : -10), ny);
+  });
+
+  // ---- central halo / ring (APEX signature look) ----
+  // soft outer glow
+  const glow = ctx2d.createRadialGradient(0, 0, haloR * 0.4, 0, 0, haloR * 2.2);
+  glow.addColorStop(0, colA(0.5));
+  glow.addColorStop(0.5, colA(0.18));
+  glow.addColorStop(1, colA(0));
+  ctx2d.fillStyle = glow;
+  ctx2d.beginPath();
+  ctx2d.arc(0, 0, haloR * 2.2, 0, Math.PI * 2);
+  ctx2d.fill();
+
+  // the ring itself — bright rim over a darker inner band, reads as a glowing halo not a filled disc
+  ctx2d.save();
+  ctx2d.shadowColor = col;
+  ctx2d.shadowBlur = 18;
+  ctx2d.strokeStyle = colA(0.9);
+  ctx2d.lineWidth = 6;
+  ctx2d.beginPath();
+  ctx2d.arc(0, 0, haloR, 0, Math.PI * 2);
+  ctx2d.stroke();
+  ctx2d.restore();
+
+  // inner bright core glass
+  const coreGrad = ctx2d.createRadialGradient(0, 0, 0, 0, 0, coreR);
+  coreGrad.addColorStop(0, 'rgba(255,255,255,0.9)');
+  coreGrad.addColorStop(0.4, colA(0.55));
+  coreGrad.addColorStop(1, colA(0.05));
+  ctx2d.fillStyle = coreGrad;
+  ctx2d.beginPath();
+  ctx2d.arc(0, 0, coreR * 0.72, 0, Math.PI * 2);
+  ctx2d.fill();
+
+  // rotating highlight sweep around the ring — subtle motion cue
+  ctx2d.save();
+  ctx2d.rotate(haloSweep);
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx2d.lineWidth = 7;
+  ctx2d.lineCap = 'round';
+  ctx2d.beginPath();
+  ctx2d.arc(0, 0, haloR, -0.35, 0.35);
+  ctx2d.stroke();
+  ctx2d.restore();
+
+  // ---- speaking: mini waveform bars under the core ----
+  if (currentState === 'speaking') {
+    const bars = 9;
+    for (let i = 0; i < bars; i++) {
+      const bx = (i - (bars - 1) / 2) * 8;
+      const h = 6 + Math.abs(Math.sin(fakeMouthPhase + i * 0.7)) * 20;
+      ctx2d.fillStyle = colA(0.85);
+      ctx2d.fillRect(bx - 1.5, haloR + 26, 3, h);
+    }
+  }
+
+  ctx2d.restore();
+}
+
+animate(performance.now());
+setState('idle');
+
+/* ============ UI: transcript, tasks, toasts ============ */
+const feed = document.getElementById('feed');
+function addMsg(who, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + who;
+  div.innerHTML = `<span class="who">${who}</span>${text}`;
+  feed.appendChild(div);
+  feed.scrollTop = feed.scrollHeight;
+  return div;
+}
+addMsg('assistant', 'Ready. Tap the mic and talk — I transcribe locally in your browser and think with Claude. Add your API key in Settings ⚙ to go live.');
+
+function toast(text, warn=false) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (warn ? ' warn' : '');
+  t.textContent = text;
+  document.getElementById('toastContainer').appendChild(t);
+  setTimeout(() => t.remove(), 3800);
+}
+
+const taskList = document.getElementById('taskList');
+let taskCounter = 0;
+function createTask(label, { risky=false } = {}) {
+  taskCounter++;
+  const id = 'task' + taskCounter;
+  const el = document.createElement('div');
+  el.className = 'task';
+  el.id = id;
+  el.innerHTML = `
+    <div class="task-top">
+      <span class="task-label">${label}</span>
+      <span class="task-status running">Running</span>
+    </div>
+    <div class="progress"><div class="progress-bar" style="width:0%"></div></div>
+  `;
+  taskList.prepend(el);
+
+  const bar = el.querySelector('.progress-bar');
+  const statusEl = el.querySelector('.task-status');
+  let progress = 0;
+  const interval = setInterval(() => {
+    progress += 8 + Math.random() * 10;
+    if (progress >= 100) {
+      progress = 100;
+      clearInterval(interval);
+      statusEl.textContent = 'Done';
+      statusEl.className = 'task-status done';
+      toast(`${label} — complete`);
+      setState('idle');
+    }
+    bar.style.width = progress + '%';
+  }, 220);
+}
+
+/* ============ Quick action chips / approval flow ============ */
+const approvalModal = document.getElementById('approvalModal');
+const approvalText = document.getElementById('approvalText');
+let pendingAction = null;
+
+document.querySelectorAll('.chip[data-action]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const action = btn.dataset.action;
+    const labels = {
+      draft: 'Draft reply',
+      send: 'Send message',
+      reschedule: 'Reschedule meeting',
+      summarize: 'Summarize thread',
+    };
+    const label = labels[action] || action;
+    if (btn.classList.contains('risky')) {
+      pendingAction = label;
+      approvalText.textContent = `This will ${label.toLowerCase()} on your behalf. Approve to continue.`;
+      approvalModal.classList.remove('hidden');
+      setState('warning');
+      return;
+    }
+    addMsg('user', label);
+    setState('thinking');
+    setTimeout(() => {
+      setState('acting');
+      addMsg('assistant', `Working on: ${label}...`);
+      createTask(label);
+    }, 900);
+  });
+});
+
+document.getElementById('approveBtn').addEventListener('click', () => {
+  approvalModal.classList.add('hidden');
+  addMsg('user', `Approved: ${pendingAction}`);
+  setState('acting');
+  createTask(pendingAction, { risky: true });
+  pendingAction = null;
+});
+document.getElementById('rejectBtn').addEventListener('click', () => {
+  approvalModal.classList.add('hidden');
+  addMsg('assistant', `Cancelled: ${pendingAction}`);
+  toast('Action cancelled', true);
+  setState('idle');
+  pendingAction = null;
+});
+
+/* ============ Demo state buttons ============ */
+document.querySelectorAll('.chip[data-state]').forEach(btn => {
+  btn.addEventListener('click', () => setState(btn.dataset.state));
+});
+
+/* ============ Settings / config (API key, system prompt, voice) ============ */
+const CONFIG_KEY = 'brain_config_v1';
+const DEFAULT_SYSTEM_PROMPT = "You are Rencho, Adeel's always-on personal companion and executive assistant — not just a task-taker. Be genuinely warm, curious, and present, the way a close friend who's paying real attention would be. Naturally check in on how he's doing and pick up on his mood from what he says and how he says it; if he seems stressed, tired, low, or excited, acknowledge it before jumping to business. Remember details he's shared before (they're listed below as memory notes) and weave them in naturally rather than reciting them back like a file lookup. Be direct and useful when he needs that, but don't be clinical — you're building an ongoing relationship with him, not resetting every conversation. Since replies are read aloud, keep them short — 1 to 3 sentences unless he asks for more detail.";
+
+const ACTION_CAPABILITY_PROMPT = `You can actually open things in Adeel's browser — you're not limited to explaining how. When he asks you to open a website, search for something, or play a song/video, DO it rather than telling him how to do it himself. To do it, put exactly one line at the very end of your reply, on its own with nothing after it, in one of these exact forms (the system executes it and removes it before anything is spoken, so it's invisible to Adeel):
+ACTION: open <sitename>
+ACTION: search <query>
+ACTION: play <query>
+Use "open" for a known site by name (youtube, gmail, calendar, spotify, netflix, maps, amazon, reddit, drive, or any bare site name), "search" for a general web search, "play" for music/video (goes to YouTube search). Give a short, natural spoken confirmation in your main reply either way, e.g. "Sure, opening YouTube now."
+
+${'' /* GitHub capability is described via the github_api tool definition itself, not free text — see githubToolFor(). */}
+If a github_api tool is available to you, it means Adeel has given you full read/write access to ALL of his GitHub repos. Whenever he asks about or wants anything GitHub-related — checking issues/PRs/commits/files/CI, whether a repo exists, or creating/editing/deleting/pushing anything — you MUST call that tool rather than guessing, promising to check "in a moment", or claiming something happened without having called it. If you're even slightly unsure of a GitHub fact, call the tool to find out instead of saying you will.`;
+
+function buildSystemPrompt() {
+  const base = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const notes = (config.memoryNotes || '').trim();
+  let prompt = `${base}\n\n${ACTION_CAPABILITY_PROMPT}`;
+  if (notes) prompt += `\n\nThings you remember about Adeel from past conversations:\n${notes}`;
+  return prompt;
+}
+
+const GITHUB_WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+let pendingGithubAction = null; // { method, path, body, description } — set when a write needs a spoken "yes"
+
+const GITHUB_TOOL_DESCRIPTION = "Call the GitHub REST API (version 2022-11-28) on Adeel's behalf. Use this for ANY GitHub-related request: checking repos, issues, PRs, commits, file contents, CI status, whether something exists, or creating/editing/deleting/pushing anything. Always call this rather than guessing, promising to check later, or claiming a result you don't actually have. Construct method/path/body using the real GitHub REST API — e.g. list repos: GET /user/repos; create a repo: POST /user/repos body {name}; list issues: GET /repos/{owner}/{repo}/issues; create an issue: POST /repos/{owner}/{repo}/issues body {title,body}. GET calls run immediately and you'll get the real result back to summarize. POST/PUT/PATCH/DELETE calls do NOT run automatically — they wait for Adeel's spoken confirmation, so when you call this tool with one of those methods, your accompanying reply text must clearly state exactly what you're about to do and ask him to confirm, not imply it already happened.";
+const GITHUB_TOOL_PARAMS = {
+  type: 'object',
+  properties: {
+    method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+    path: { type: 'string', description: 'GitHub API path starting with /, e.g. /user/repos or /repos/owner/repo/issues' },
+    body: { type: 'object', description: 'JSON body for POST/PUT/PATCH requests; omit for GET/DELETE with no body' },
+    description: { type: 'string', description: "Short plain-English description of exactly what this call does, e.g. \"create an issue titled X on adeel/reponame\"" }
+  },
+  required: ['method', 'path', 'description']
+};
+function githubToolFor(provider) {
+  if (provider === 'openai') {
+    return [{ type: 'function', function: { name: 'github_api', description: GITHUB_TOOL_DESCRIPTION, parameters: GITHUB_TOOL_PARAMS } }];
+  }
+  return [{ name: 'github_api', description: GITHUB_TOOL_DESCRIPTION, input_schema: GITHUB_TOOL_PARAMS }];
+}
+
+async function callGithubProxy(method, path, body) {
+  const res = await fetch('/proxy/github', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ _token: config.githubToken, method, path, body })
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch (e) { data = text; }
+  return { ok: res.ok, status: res.status, data };
+}
+
+// Turns a raw API result into a short spoken summary via a throwaway
+// exchange that doesn't pollute the real persisted conversation history.
+async function summarizeForSpeech(label, resultObj) {
+  const apiKey = currentApiKey();
+  const provider = config.provider === 'openai' ? 'openai' : 'anthropic';
+  const snippet = JSON.stringify(resultObj).slice(0, 3000);
+  const prompt = `${label}. Raw API result:\n${snippet}\n\nSummarize this for Adeel in 1-2 short spoken sentences, plain language, no JSON, no field names.`;
+  const savedConversation = conversation;
+  conversation = conversation.slice(-6).concat([{ role: 'user', content: prompt }]);
+  try {
+    const { text: raw } = provider === 'openai' ? await callOpenAI(apiKey) : await callAnthropic(apiKey);
+    return raw.replace(/\n?ACTION:[\s\S]*$/i, '').trim();
+  } finally {
+    conversation = savedConversation;
+  }
+}
+
+// Parses a trailing "ACTION: verb ..." line out of a reply, executes it
+// (or stages it for confirmation if it's a GitHub write), and returns the
+// text that should actually be shown/spoken in its place.
+let lastActionMatched = false; // set by processActionDirective, checked right after in sendToBrain
+
+async function processActionDirective(replyText) {
+  const match = replyText.match(/\n?ACTION:\s*(open|search|play)\s+(.+?)\s*$/i);
+  lastActionMatched = !!match;
+  if (!match) return replyText;
+
+  const [, verbRaw, argRaw] = match;
+  const verb = verbRaw.toLowerCase();
+  const cleaned = replyText.slice(0, match.index).trim();
+  const arg = argRaw.trim().replace(/[.!?]+$/, '');
+
+  if (verb === 'search') {
+    openTab('https://www.google.com/search?q=' + encodeURIComponent(arg));
+  } else if (verb === 'play') {
+    openTab('https://www.youtube.com/results?search_query=' + encodeURIComponent(arg));
+  } else if (verb === 'open') {
+    const key = arg.toLowerCase();
+    const siteKey = Object.keys(ACTION_SITES).find(s => key === s || key === s + 's');
+    if (siteKey) {
+      openTab(ACTION_SITES[siteKey]);
+    } else if (/^[a-z0-9]+$/i.test(key)) {
+      openTab('https://www.' + key + '.com');
+    }
+  }
+  return cleaned;
+}
+
+// Handles a real github_api tool call from the model (native function
+// calling — far more reliable than asking the model to embed a text
+// marker, which it kept skipping under load).
+async function handleGithubToolCall(input, modelText) {
+  const method = (input.method || 'GET').toUpperCase();
+  const path = input.path;
+  const body = input.body;
+  const description = input.description || `${method} ${path}`;
+
+  if (!config.githubToken) {
+    return "I don't have a GitHub token yet — add one in Settings and I can work with your repos.";
+  }
+  if (!path) return modelText || "Sorry, I didn't get a clear enough GitHub request.";
+
+  if (GITHUB_WRITE_METHODS.includes(method)) {
+    pendingGithubAction = { method, path, body, description };
+    return modelText || `I'm ready to ${description}. Say yes to confirm.`;
+  }
+
+  try {
+    const result = await callGithubProxy(method, path, body);
+    return await summarizeForSpeech(`Looked up on GitHub: ${description}`, result.data);
+  } catch (err) {
+    console.error(err);
+    return "Sorry, I couldn't reach GitHub just now — check your token and connection.";
+  }
+}
+
+// Runs a previously-confirmed GitHub write and speaks the real result.
+async function runConfirmedGithubAction(action) {
+  try {
+    const result = await callGithubProxy(action.method, action.path, action.body);
+    const summary = await summarizeForSpeech(`I just did this on GitHub: ${action.description}`, result.data);
+    pushMessage('assistant', summary);
+    setState('speaking');
+    addMsg('assistant', summary);
+    speak(summary);
+  } catch (err) {
+    console.error(err);
+    const msg = "Sorry, that GitHub action failed — check your token and connection in Settings.";
+    setState('speaking');
+    addMsg('assistant', msg);
+    speak(msg);
+  }
+}
+
+function loadConfig() {
+  try { return JSON.parse(localStorage.getItem(CONFIG_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveConfig(cfg) { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); }
+let config = loadConfig();
+
+function currentApiKey() {
+  return config.provider === 'openai' ? config.openaiApiKey : config.apiKey;
+}
+
+function updateConnectionStat() {
+  const el = document.getElementById('connectionStat');
+  if (currentApiKey()) {
+    el.textContent = (config.provider === 'openai' ? 'ChatGPT' : 'Claude') + ' connected';
+    el.style.color = 'var(--ok)';
+  } else {
+    el.textContent = 'No API key';
+    el.style.color = 'var(--warn)';
+  }
+}
+updateConnectionStat();
+
+const settingsModal = document.getElementById('settingsModal');
+const providerSelect = document.getElementById('providerSelect');
+const apiKeyLabel = document.getElementById('apiKeyLabel');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const systemPromptInput = document.getElementById('systemPromptInput');
+const voiceSelect = document.getElementById('voiceSelect');
+
+function syncApiKeyFieldToProvider() {
+  const openaiModelRow = document.getElementById('openaiModelRow');
+  const openaiModelInput = document.getElementById('openaiModelInput');
+  if (providerSelect.value === 'openai') {
+    apiKeyLabel.textContent = 'OpenAI API Key';
+    apiKeyInput.placeholder = 'sk-proj-...';
+    apiKeyInput.value = config.openaiApiKey || '';
+    openaiModelRow.style.display = '';
+    openaiModelInput.value = config.openaiModel || 'gpt-4o-mini';
+  } else {
+    apiKeyLabel.textContent = 'Anthropic API Key';
+    apiKeyInput.placeholder = 'sk-ant-...';
+    apiKeyInput.value = config.apiKey || '';
+    openaiModelRow.style.display = 'none';
+  }
+}
+providerSelect.addEventListener('change', syncApiKeyFieldToProvider);
+
+function populateVoices() {
+  if (!('speechSynthesis' in window)) return;
+  const voices = window.speechSynthesis.getVoices();
+  voiceSelect.innerHTML = '<option value="">Default</option>' +
+    voices.map(v => `<option value="${v.name}">${v.name} (${v.lang})</option>`).join('');
+  if (config.voiceName) voiceSelect.value = config.voiceName;
+}
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = populateVoices;
+  populateVoices();
+}
+
+const memoryNotesInput = document.getElementById('memoryNotesInput');
+const githubTokenInput = document.getElementById('githubTokenInput');
+
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  providerSelect.value = config.provider || 'anthropic';
+  syncApiKeyFieldToProvider();
+  systemPromptInput.value = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  memoryNotesInput.value = config.memoryNotes || '';
+  githubTokenInput.value = config.githubToken || '';
+  populateVoices();
+  settingsModal.classList.remove('hidden');
+});
+document.getElementById('settingsCloseBtn').addEventListener('click', () => settingsModal.classList.add('hidden'));
+document.getElementById('settingsSaveBtn').addEventListener('click', () => {
+  config.provider = providerSelect.value;
+  if (config.provider === 'openai') {
+    config.openaiApiKey = apiKeyInput.value.trim();
+    config.openaiModel = (document.getElementById('openaiModelInput').value || '').trim() || 'gpt-4o-mini';
+  } else {
+    config.apiKey = apiKeyInput.value.trim();
+  }
+  config.systemPrompt = systemPromptInput.value.trim();
+  config.voiceName = voiceSelect.value;
+  config.memoryNotes = memoryNotesInput.value.trim();
+  config.githubToken = githubTokenInput.value.trim();
+  saveConfig(config);
+  updateConnectionStat();
+  settingsModal.classList.add('hidden');
+  toast('Settings saved');
+});
+document.getElementById('clearMemoryBtn').addEventListener('click', () => {
+  config.memoryNotes = '';
+  config.conversationHistory = [];
+  conversation = [];
+  memoryNotesInput.value = '';
+  saveConfig(config);
+  toast('Memory and chat history cleared');
+});
+
+/* ============ Claude brain (text in -> text out) ============ */
+const MAX_HISTORY = 30; // trimmed message count, keeps token usage/cost bounded
+let conversation = Array.isArray(config.conversationHistory) ? config.conversationHistory.slice(-MAX_HISTORY) : [];
+
+// Replay persisted history into the transcript so the conversation feels
+// continuous across reloads instead of starting blank every time.
+conversation.forEach(m => addMsg(m.role === 'user' ? 'user' : 'assistant', m.content));
+
+function pushMessage(role, content) {
+  conversation.push({ role, content });
+  if (conversation.length > MAX_HISTORY) conversation = conversation.slice(-MAX_HISTORY);
+  config.conversationHistory = conversation;
+  saveConfig(config);
+}
+
+async function callAnthropic(apiKey, { tools } = {}) {
+  const body = {
+    model: config.model || 'claude-sonnet-5',
+    max_tokens: 400,
+    system: buildSystemPrompt(),
+    messages: conversation
+  };
+  if (tools) body.tools = tools;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`${res.status}: ${errBody.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const content = data.content || [];
+  const text = content.filter(b => b.type === 'text').map(b => b.text || '').join(' ').trim();
+  const toolBlock = content.find(b => b.type === 'tool_use');
+  const toolCall = toolBlock ? { name: toolBlock.name, input: toolBlock.input } : null;
+  return { text: text || '(empty response)', toolCall };
+}
+
+async function callOpenAI(apiKey, { tools } = {}) {
+  // OpenAI's API has no CORS support, so a browser page can never call it
+  // directly (Anthropic's API is the exception). This goes through the
+  // local Rencho server instead, which makes the actual OpenAI call
+  // server-side and hands the reply back — only works when this page is
+  // loaded from http://127.0.0.1:8765, not as a file:// path.
+  const payload = {
+    _apiKey: apiKey,
+    model: config.openaiModel || 'gpt-4o-mini',
+    max_tokens: 400,
+    messages: [
+      { role: 'system', content: buildSystemPrompt() },
+      ...conversation
+    ]
+  };
+  if (tools) payload.tools = tools;
+  const res = await fetch('/proxy/openai', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`${res.status}: ${errBody.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const msg = (data.choices || [])[0]?.message || {};
+  const text = (msg.content || '').trim();
+  const tc = (msg.tool_calls || [])[0];
+  let toolCall = null;
+  if (tc && tc.function) {
+    try { toolCall = { name: tc.function.name, input: JSON.parse(tc.function.arguments) }; }
+    catch (e) { console.warn('Rencho: tool_call arguments failed to parse', tc.function.arguments); }
+  }
+  return { text: text || '(empty response)', toolCall };
+}
+
+async function sendToBrain(userText) {
+  pushMessage('user', userText);
+
+  const provider = config.provider === 'openai' ? 'openai' : 'anthropic';
+  const apiKey = provider === 'openai' ? config.openaiApiKey : config.apiKey;
+  const providerLabel = provider === 'openai' ? 'ChatGPT' : 'Claude';
+
+  if (!apiKey) {
+    const msg = `I don't have an API key yet. Open Settings and add your ${providerLabel} API key to wire me up to real intelligence.`;
+    setState('speaking');
+    addMsg('assistant', msg);
+    speak(msg, { continueConversation: false });
+    toast('No API key set — open Settings ⚙', true);
+    return;
+  }
+
+  try {
+    const tools = config.githubToken ? githubToolFor(provider) : null;
+    const { text: rawText, toolCall } = provider === 'openai'
+      ? await callOpenAI(apiKey, { tools })
+      : await callAnthropic(apiKey, { tools });
+    console.log('[Rencho raw reply]', rawText, toolCall); // temporary debug aid
+
+    let replyText;
+    if (toolCall && toolCall.name === 'github_api') {
+      replyText = await handleGithubToolCall(toolCall.input, rawText);
+    } else {
+      replyText = await processActionDirective(rawText); // runs/strips any ACTION: open|search|play line
+      if (!lastActionMatched && /\b(one moment|let me check|i'?ll check|checking now|give me a moment|i'?ll confirm|i'?ll (?:go |take a )?look)\b/i.test(replyText) && /github|repo/i.test(userText)) {
+        toast('Heads up: that reply didn\'t actually check/do anything on GitHub — no tool call was made.', true);
+      }
+    }
+
+    pushMessage('assistant', replyText);
+    setState('speaking');
+    addMsg('assistant', replyText);
+    speak(replyText); // continueConversation defaults to true — keeps the mic open for a follow-up
+  } catch (err) {
+    console.error(err);
+    toast(`${providerLabel} request failed: ` + err.message, true);
+    addMsg('assistant', `Sorry — I hit an error reaching ${providerLabel}. Check your API key and connection in Settings ⚙.`);
+    setState('idle');
+  }
+}
+
+function speak(text, { continueConversation = true } = {}) {
+  if (muted || !('speechSynthesis' in window)) {
+    setState('idle');
+    if (continueConversation) resumeConversationListening();
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  if (config.voiceName) {
+    const v = window.speechSynthesis.getVoices().find(v => v.name === config.voiceName);
+    if (v) utter.voice = v;
+  }
+  utter.onend = () => {
+    setState('idle');
+    if (continueConversation) resumeConversationListening();
+  };
+  utter.onerror = () => {
+    setState('idle');
+    if (continueConversation) resumeConversationListening();
+  };
+  window.speechSynthesis.speak(utter);
+}
+
+// After Rencho finishes talking, briefly reopen the mic for a follow-up
+// instead of dropping back to wake-word mode — like a real back-and-forth.
+// If you don't say anything, the normal speech-recognition silence timeout
+// (a few seconds) ends it and it falls back to waiting for "Rencho" again.
+function resumeConversationListening() {
+  setTimeout(() => {
+    if (currentState === 'idle' && !listening) startListening();
+  }, 400);
+}
+
+/* ============ Mic: live audio-reactive listening + real speech-to-text ============ */
+const micBtn = document.getElementById('micBtn');
+const micHint = document.getElementById('micHint');
+let audioCtx, analyser, dataArray, stream, listening = false;
+let liveMsgEl = null, finalTranscript = '';
+
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+if (SpeechRecognitionCtor) {
+  recognition = new SpeechRecognitionCtor();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onresult = (e) => {
+    let interim = '';
+    finalTranscript = '';
+    for (let i = 0; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalTranscript += t;
+      else interim += t;
+    }
+    if (liveMsgEl) liveMsgEl.innerHTML = `<span class="who">user</span>${(finalTranscript + interim) || '…'}`;
+  };
+  recognition.onerror = (e) => {
+    if (e.error !== 'no-speech') toast('Mic error: ' + e.error, true);
+  };
+  recognition.onend = () => {
+    if (listening) cleanupAudioViz(); // recognition can end itself on silence
+    handleFinalTranscript(finalTranscript.trim());
+  };
+}
+
+function cleanupAudioViz() {
+  listening = false;
+  audioLevel = 0;
+  micHint.textContent = wakeModeWanted ? 'Say "Rencho" or tap to talk' : 'Tap to talk · hold for manual';
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+}
+
+async function startListening() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    toast('Microphone access denied', true);
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
+  source.connect(analyser);
+
+  listening = true;
+  setState('listening');
+  micHint.textContent = 'Listening… tap to stop';
+  sampleAudio();
+
+  finalTranscript = '';
+  liveMsgEl = addMsg('user', '🎤 Listening…');
+
+  if (recognition) {
+    try { recognition.start(); } catch (e) { /* already running */ }
+  } else {
+    toast('Speech recognition not supported in this browser — try Chrome', true);
+  }
+}
+
+function sampleAudio() {
+  if (!listening) return;
+  analyser.getByteFrequencyData(dataArray);
+  const avg = dataArray.reduce((a,b) => a+b, 0) / dataArray.length;
+  audioLevel = Math.min(avg / 90, 1);
+  requestAnimationFrame(sampleAudio);
+}
+
+function stopListening() {
+  if (!listening) return;
+  cleanupAudioViz();
+  if (recognition) {
+    try { recognition.stop(); } catch (e) { handleFinalTranscript(finalTranscript.trim()); }
+  } else {
+    handleFinalTranscript('');
+  }
+}
+
+/* ============ Local actions: things Rencho actually does, no AI call needed ============ */
+const ACTION_SITES = {
+  youtube: 'https://www.youtube.com', gmail: 'https://mail.google.com', email: 'https://mail.google.com',
+  calendar: 'https://calendar.google.com', maps: 'https://maps.google.com', news: 'https://news.google.com',
+  spotify: 'https://open.spotify.com', netflix: 'https://www.netflix.com', drive: 'https://drive.google.com',
+  amazon: 'https://www.amazon.com', reddit: 'https://www.reddit.com',
+};
+
+function openTab(url) {
+  const win = window.open(url, '_blank');
+  if (!win) toast('Popup blocked — click the blocked-popup icon in the address bar and choose "Always allow"', true);
+  return win;
+}
+
+// Returns a spoken reply string if it fully handled the request locally,
+// or null to fall through to the AI as normal.
+// Strip natural lead-ins ("can you", "hey rencho, please", ...) so intent
+// matching isn't thrown off by how the request is phrased.
+function stripLeadIn(text) {
+  let s = text;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const before = s;
+    s = s.replace(/^(hey|ok|okay|yo)[,\s]+/i, '');
+    s = s.replace(/^(rencho)[,\s]+/i, '');
+    s = s.replace(/^(can|could|would|will)\s+you\s+/i, '');
+    s = s.replace(/^(please|pls)[,\s]+/i, '');
+    s = s.replace(/^i\s+(want|need)\s+(you\s+to|to)\s+/i, '');
+    s = s.replace(/^let'?s\s+/i, '');
+    s = s.trim();
+    if (s !== before) changed = true;
+  }
+  return s;
+}
+
+function tryHandleAction(text) {
+  const lower = stripLeadIn(text.toLowerCase().trim().replace(/[.!?]+$/, ''));
+
+  let m = lower.match(/^remember that\s+(.+)/) || lower.match(/^remember\s+(.+)/);
+  if (m) {
+    const fact = m[1].trim();
+    const notes = (config.memoryNotes || '').trim();
+    config.memoryNotes = notes ? notes + '\n- ' + fact : '- ' + fact;
+    saveConfig(config);
+    return `Got it — I'll remember that ${fact}.`;
+  }
+
+  m = lower.match(/^(?:play|put on)\s+(.+)/);
+  if (m) {
+    const query = m[1].replace(/^some\s+/, '').trim();
+    openTab('https://www.youtube.com/results?search_query=' + encodeURIComponent(query));
+    return `Playing "${query}" on YouTube.`;
+  }
+
+  m = lower.match(/^(?:google|search(?: for)?)\s+(.+)/);
+  if (m) {
+    const query = m[1].trim();
+    openTab('https://www.google.com/search?q=' + encodeURIComponent(query));
+    return `Searching for "${query}".`;
+  }
+
+  m = lower.match(/^open\s+(?:my\s+)?([a-z0-9 ]+)/);
+  if (m) {
+    const key = m[1].trim();
+    const siteKey = Object.keys(ACTION_SITES).find(s => key === s || key === s + 's');
+    if (siteKey) {
+      openTab(ACTION_SITES[siteKey]);
+      return `Opening ${siteKey}.`;
+    }
+    if (/^[a-z0-9]+$/.test(key)) {
+      openTab('https://www.' + key + '.com');
+      return `Opening ${key}.com.`;
+    }
+  }
+
+  return null;
+}
+
+function isAffirmative(text) {
+  return /^(yes|yeah|yep|yup|sure|go ahead|do it|confirm(ed)?|okay|ok)\b/i.test(text.trim());
+}
+
+function handleFinalTranscript(text) {
+  if (liveMsgEl) {
+    liveMsgEl.innerHTML = `<span class="who">user</span>${text || '(no speech detected)'}`;
+    liveMsgEl = null;
+  }
+  if (!text) { setState('idle'); return; }
+
+  // A GitHub write was staged last turn — this utterance is the yes/no,
+  // handled locally with no AI call either way.
+  if (pendingGithubAction) {
+    const action = pendingGithubAction;
+    pendingGithubAction = null;
+    if (isAffirmative(text)) {
+      setState('thinking');
+      runConfirmedGithubAction(action);
+    } else {
+      const msg = "Okay, cancelled — I won't do that.";
+      setState('speaking');
+      addMsg('assistant', msg);
+      speak(msg);
+    }
+    return;
+  }
+
+  const actionReply = tryHandleAction(text);
+  if (actionReply) {
+    setState('speaking');
+    addMsg('assistant', actionReply);
+    speak(actionReply);
+    return;
+  }
+
+  setState('thinking');
+  sendToBrain(text);
+}
+
+micBtn.addEventListener('click', () => {
+  if (!listening) startListening();
+  else stopListening();
+});
+
+/* ============ Wake word: say "Rencho" to start talking, no tap needed ============ */
+// Common ways "Rencho" gets misheard by the browser's speech recognizer,
+// matched loosely so the wake word still fires on an imperfect transcript.
+const WAKE_REGEX = /\b(rencho|ren\s?cho|wren\s?cho|ren\s?show|rancho|renshaw)\b/i;
+let awaitingCommand = false; // true from the moment we hear "Rencho" until we actually start capturing the command
+
+function buildWakeRecognition() {
+  const wr = new SpeechRecognitionCtor();
+  wr.continuous = true;
+  wr.interimResults = true;
+  wr.lang = 'en-US';
+  wr.onresult = (e) => {
+    let text = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) text += e.results[i][0].transcript + ' ';
+    if (WAKE_REGEX.test(text)) onWakeWordHeard();
+  };
+  wr.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      wakeModeWanted = false;
+      toast('Mic permission blocked — wake word disabled. Allow mic access and reload.', true);
+    }
+    // 'no-speech' / 'aborted' are routine in continuous mode; onend handles restart.
+  };
+  wr.onend = () => {
+    if (wakeModeWanted && currentState === 'idle' && !awaitingCommand) {
+      try { wr.start(); } catch (e) { /* already running */ }
+    }
+  };
+  return wr;
+}
+
+function onWakeWordHeard() {
+  if (awaitingCommand || listening || currentState !== 'idle') return;
+  awaitingCommand = true;
+  try { wakeRecognition.stop(); } catch (e) { /* not running */ }
+  toast('Rencho — listening…');
+  const beginCommand = () => { awaitingCommand = false; startListening(); };
+  if ('speechSynthesis' in window && !muted) {
+    const ack = new SpeechSynthesisUtterance('Yes?');
+    ack.onend = beginCommand;
+    ack.onerror = beginCommand;
+    window.speechSynthesis.speak(ack);
+  } else {
+    beginCommand();
+  }
+}
+
+function startWakeMode() {
+  if (!SpeechRecognitionCtor) {
+    toast('Wake word needs a browser with Web Speech support (try Chrome)', true);
+    return;
+  }
+  wakeModeWanted = true;
+  if (!wakeRecognition) wakeRecognition = buildWakeRecognition();
+  try { wakeRecognition.start(); } catch (e) { /* already running */ }
+  micHint.textContent = 'Say "Rencho" or tap to talk';
+}
+
+// On by default whenever the browser supports it — no setup needed.
+startWakeMode();
+
+/* ============ Mute / interrupt ============ */
+const muteBtn = document.getElementById('muteBtn');
+let muted = false;
+muteBtn.addEventListener('click', () => {
+  muted = !muted;
+  muteBtn.classList.toggle('active', muted);
+  muteBtn.textContent = muted ? '🔈' : '🔇';
+  toast(muted ? 'Muted' : 'Unmuted');
+});
+document.getElementById('interruptBtn').addEventListener('click', () => {
+  if (listening) stopListening();
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  setState('idle');
+  toast('Interrupted', true);
+});
+
+/* ============ Uptime + mock counters ============ */
+const startTime = Date.now();
+setInterval(() => {
+  const s = Math.floor((Date.now() - startTime) / 1000);
+  const hh = String(Math.floor(s/3600)).padStart(2,'0');
+  const mm = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  document.getElementById('uptime').textContent = `uptime ${hh}:${mm}:${ss}`;
+}, 1000);
+</script>
+</body>
+</html>
