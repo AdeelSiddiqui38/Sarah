@@ -11,10 +11,13 @@ built" so work doesn't get redone or contradicted.
 Adeel's personal, always-on JARVIS-style executive assistant and companion.
 Three parts, loosely connected:
 
-1. **The avatar** — `BRAIN\jarvis-avatar-ui.html`, a standalone browser page
-   with voice in/out, a glowing cyan halo-core visual with 10 labeled
-   specialist-agent nodes orbiting it (APEX-inspired look), and a direct
-   chat connection to Claude or ChatGPT (user's own API key).
+1. **The avatar** — `BRAIN\Rencho\jarvis-avatar-ui.html` (moved into the
+   Rencho folder so the repo and the live-served file are the same; served at
+   http://127.0.0.1:8765/jarvis-avatar-ui.html), a standalone browser page
+   with voice in/out AND a typed composer (with image/doc attach), a glowing
+   cyan halo-core visual with 10 labeled specialist-agent nodes orbiting it
+   (APEX-inspired look), and a direct chat connection to Claude or ChatGPT
+   (user's own API key).
 2. **The background services** — `BRAIN\Rencho\`, a local Python server +
    wake-word listener that make the avatar reachable by voice/icon without
    opening Claude, and proxy the OpenAI call server-side.
@@ -87,9 +90,11 @@ capabilities:
 ## BRAIN\Rencho\ — background services
 
 - **`rencho_server.py`** — local Python HTTP server on
-  `http://127.0.0.1:8765`, serves the whole BRAIN folder (so the avatar has
-  a stable origin) and proxies OpenAI chat calls server-side at
-  `POST /proxy/openai` (bypasses OpenAI's lack of CORS support). Started
+  `http://127.0.0.1:8765`, serves the `BRAIN\Rencho` folder (BASE_DIR was
+  changed from BRAIN root to the Rencho folder) so the avatar has a stable
+  origin, and proxies both OpenAI chat calls (`POST /proxy/openai`) and GitHub
+  REST calls (`POST /proxy/github`) server-side (bypasses their lack of CORS).
+  Forces Cache-Control: no-store on every response. Started
   via `run_rencho_server.vbs` (silent, no console window).
   - **Why a local server exists at all**: Chrome does NOT reliably
     remember microphone permission for `file://` pages — it re-prompts
@@ -187,31 +192,73 @@ capabilities:
   ask 2–3 short clarifying questions before starting multi-step work,
   don't over-research before asking.
 
-## In progress / not yet built
+## Current state — what's built and live (updated 2026-07-25)
 
-- **GitHub integration** — most recent open thread. Decisions made so far:
-  - Repo scope: **all repos**.
-  - Action scope: **everything, including pushing/editing code** (highest
-    stakes option Adeel picked).
-  - Connection method: Adeel first said "Cowork's GitHub connector," but
-    that only works for *me*, in this chat — it can't be reached by the
-    standalone avatar. For **voice/Rencho-reachable** GitHub specifically,
-    the plan is a **GitHub personal access token wired into
-    `rencho_server.py`** (same proxy pattern already used for OpenAI),
-    not the Cowork connector, since the connector doesn't extend outside
-    this chat session.
-  - Safety line already agreed with the user: real write actions (create/
-    edit/push) get a quick voice confirmation before executing — this was
-    stated as non-negotiable, not just a suggestion.
-  - **Nothing has been built yet for this** — no token setup, no
-    `/proxy/github`-style endpoint, no persona/action wiring. Next step
-    when resuming: have Adeel generate a GitHub PAT (scoped to repo
-    read/write), add a `/proxy/github` endpoint to `rencho_server.py`
-    mirroring the OpenAI proxy's structure, extend `ACTION_CAPABILITY_PROMPT`
-    / `extractAndRunAction()` in the avatar to cover GitHub verbs, and
-    build in the confirm-before-write step (e.g., a pending-action
-    variable that requires a spoken "yes" before the destructive call
-    actually fires).
+### GitHub control (DONE — this was the big open thread)
+- Rencho has real read/write GitHub access via **native LLM tool-calling**
+  (Anthropic `tools`/`tool_use`, OpenAI `tools`/`tool_calls`) — a `github_api`
+  tool the model calls directly. This replaced an earlier free-text
+  `ACTION: github {...}` marker that proved unreliable (the model kept
+  forgetting to emit the line). open/search/play still use the ACTION-marker
+  path; only GitHub moved to tool-calling.
+- Server side: `POST /proxy/github` in `rencho_server.py` — generic
+  method+path+body forwarder to api.github.com, adds the PAT server-side
+  (mirrors the OpenAI proxy). The PAT lives only in the browser's localStorage
+  (Settings → "GitHub Personal Access Token"), never in a file.
+- Safety honored: GET runs immediately; POST/PUT/PATCH/DELETE stage a
+  `pendingGithubAction` and require a spoken/typed "yes" before firing.
+
+### Rencho avatar — recent changes
+- **Composer** ("Talk to Rencho" panel, replaced Demo State Controls): type
+  instructions (Enter to send), plus **paste/attach images and documents**.
+  Images downscale→base64 to the vision model; PDFs (pdf.js CDN) and text files
+  are read and passed as text. Attachments never persisted. Typed input runs the
+  same pipeline as voice (actions, GitHub tool, confirm-before-write). Vision
+  needs a vision model (Claude default fine; OpenAI use gpt-4o/gpt-4o-mini).
+- Header renamed to "RENCHO"; right-side demo panels (Active Tasks/Status/
+  Session Memory) hidden (display:none, elements kept so JS refs don't break).
+
+### GitHub sync of the Rencho project itself
+- `BRAIN\Rencho` is a git repo pushed to **github.com/AdeelSiddiqui38/Rancho**
+  (private). Kept in sync with **`Rencho-Sync.bat`** (double-click → add/commit/
+  push). Git runs natively on the PC (Git Bash/PowerShell); the sandbox CANNOT
+  run git on the FUSE mount (lock files can't be unlinked). `.gitignore` excludes
+  the Vosk model, logs, icon scratch PNGs. After Claude edits Rencho files, user
+  runs Rencho-Sync.bat and reloads the page.
+
+## APEX Physiotherapy website — Rencho-controlled (NEW, in progress)
+
+Goal: Rencho controls the APEX Physiotherapy & Wellness Clinic website — repo
+AND live site.
+
+- **Business**: Apex Physio & Wellness Clinic, Unit 150, 246 Nolanridge Crescent
+  NW, Calgary, Alberta. Phone/email TBD. Independent from 1physioandmobility.ca
+  (same staff). Logo drafted in Canva.
+- **Repo**: github.com/AdeelSiddiqui38/ApexPhysio (now **PUBLIC**). Local clone at
+  `C:\Users\asid3\Documents\APEX\APEX_Website\APEX` (already git-linked, on main).
+  Added `.gitignore` (ignores .gstack/) and **`APEX-Sync.bat`** (one-click push) —
+  these two are new & not yet pushed.
+- **Site type**: static HTML/CSS/JS. The **deployable site is the `apexphysio/`
+  SUBFOLDER** (index.html, booking.js, interactions.js, motion-bg.js,
+  gsap-lottie.js, site.css, send-booking.php, assets/, marketing/). Repo ROOT has
+  older concept files (website-concept.html etc.) + 23 pages of content in a .docx.
+- **Domain**: `apex-physio.ca`, at WHC (Web Hosting Canada), **not active yet**.
+  (www.whc.ca is the HOST, not the clinic site — easy point of confusion.)
+- **Deployment DECISION**: static + **auto-deploy via Netlify** (NOT GitHub Pages —
+  the booking form posts to `send-booking.php`, and Pages can't run PHP). Netlify
+  auto-deploys from the repo (keeps Rencho in control via GitHub) and has built-in
+  form handling to replace the PHP. Publish directory = `apexphysio`.
+- **Original plan (superseded)**: PROJECT_STATUS.md documented WordPress+Elementor
+  on WHC — rejected because it isn't practically Rencho-controllable.
+- **PAUSED HERE — next steps** when resuming:
+  1. Convert the booking form in `apexphysio/index.html` from the PHP handler to
+     **Netlify Forms** (add `data-netlify="true"`, drop the `.php` action; retire
+     send-booking.php). *Awaiting user's go-ahead to edit.*
+  2. User creates a free **Netlify** account, connects it to the ApexPhysio repo,
+     publish dir `apexphysio`. *(Asked whether they already have an account —
+     unanswered.)*
+  3. Point `apex-physio.ca` DNS at Netlify (records to be provided; needs the
+     user's WHC/domain login).
 
 ## Known gotchas / traps for future-Claude
 
