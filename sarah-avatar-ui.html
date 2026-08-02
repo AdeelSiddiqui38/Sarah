@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Rencho</title>
+<title>Sarah</title>
 <style>
   :root{
     --bg:#05070d;
@@ -136,7 +136,7 @@
 
   <div class="hud">
     <div class="topbar">
-      <div class="brand"><span class="dot"></span> RENCHO</div>
+      <div class="brand"><span class="dot"></span> SARAH</div>
       <div class="status-pill" id="statusPill"><span class="ring" id="statusRing"></span><span id="statusText">Idle</span></div>
       <div class="topbar-right">
         <span class="uptime" id="uptime">uptime 00:00:00</span>
@@ -158,7 +158,7 @@
         </div>
       </div>
       <div class="panel">
-        <h3>Talk to Rencho</h3>
+        <h3>Talk to Sarah</h3>
         <div class="composer">
           <div class="attach-preview" id="attachPreview"></div>
           <div class="composer-row">
@@ -213,7 +213,7 @@
 
   <div class="modal hidden" id="settingsModal">
     <div class="modal-card" style="width:420px;text-align:left;">
-      <h4 style="text-align:center;">Rencho Settings</h4>
+      <h4 style="text-align:center;">Sarah Settings</h4>
       <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">AI Provider</label>
       <select id="providerSelect"
         style="width:100%;margin:6px 0 14px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
@@ -235,7 +235,7 @@
       <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">Voice</label>
       <select id="voiceSelect"
         style="width:100%;margin:6px 0 14px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;"></select>
-      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">What Rencho Remembers</label>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">What Sarah Remembers</label>
       <textarea id="memoryNotesInput" rows="4" placeholder="Builds up automatically as you talk — say &quot;remember that ...&quot; anytime, or edit this list directly."
         style="width:100%;margin:6px 0 4px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;resize:vertical;"></textarea>
       <div style="display:flex;justify-content:flex-end;margin:0 0 14px;">
@@ -244,7 +244,7 @@
       <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">GitHub Personal Access Token</label>
       <input type="password" id="githubTokenInput" placeholder="ghp_..." autocomplete="off"
         style="width:100%;margin:6px 0 4px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
-      <p style="font-size:11px;color:var(--text-dim);margin:0 0 14px;line-height:1.5;">Reads/writes to your repos by voice once set. Rencho will always ask "yes" before it actually creates, edits, or pushes anything — it never does a write silently.</p>
+      <p style="font-size:11px;color:var(--text-dim);margin:0 0 14px;line-height:1.5;">Reads/writes to your repos by voice once set. Sarah will always ask "yes" before it actually creates, edits, or pushes anything — it never does a write silently.</p>
       <p style="font-size:11px;color:var(--text-dim);margin:0 0 16px;line-height:1.5;">Your key is saved only in this browser (localStorage) and sent directly from your browser to the provider's API — it never passes through me or any other server. Paste it yourself; I won't ask for it.</p>
       <div class="modal-actions">
         <button class="btn btn-reject" id="settingsCloseBtn">Close</button>
@@ -332,7 +332,7 @@ function setState(state) {
   document.getElementById('micBtn').classList.toggle('live', state === 'listening');
 
   // Wake-word mic must yield the microphone to command capture whenever
-  // we're not idle, and resume listening for "Rencho" once we're back.
+  // we're not idle, and resume listening for "Sarah" once we're back.
   if (wakeRecognition) {
     if (state !== 'idle') {
       try { wakeRecognition.stop(); } catch (e) { /* not running */ }
@@ -637,7 +637,7 @@ document.getElementById('rejectBtn').addEventListener('click', () => {
   pendingAction = null;
 });
 
-/* ============ Composer: type / paste / attach to talk to Rencho ============ */
+/* ============ Composer: type / paste / attach to talk to Sarah ============ */
 let pendingAttachments = []; // transient — never persisted (base64 stays out of localStorage)
 const composerInput = document.getElementById('composerInput');
 const attachBtn = document.getElementById('attachBtn');
@@ -759,8 +759,8 @@ async function sendComposer() {
 }
 
 /* ============ Settings / config (API key, system prompt, voice) ============ */
-const CONFIG_KEY = 'brain_config_v1';
-const DEFAULT_SYSTEM_PROMPT = "You are Rencho, Adeel's always-on personal companion and executive assistant — not just a task-taker. Be genuinely warm, curious, and present, the way a close friend who's paying real attention would be. Naturally check in on how he's doing and pick up on his mood from what he says and how he says it; if he seems stressed, tired, low, or excited, acknowledge it before jumping to business. Remember details he's shared before (they're listed below as memory notes) and weave them in naturally rather than reciting them back like a file lookup. Be direct and useful when he needs that, but don't be clinical — you're building an ongoing relationship with him, not resetting every conversation. Since replies are read aloud, keep them short — 1 to 3 sentences unless he asks for more detail.";
+const CONFIG_KEY = 'sarah_config_v1';
+const DEFAULT_SYSTEM_PROMPT = "You are Sarah, Adeel's always-on personal companion and executive assistant — not just a task-taker. Be genuinely warm, curious, and present, the way a close friend who's paying real attention would be. Naturally check in on how he's doing and pick up on his mood from what he says and how he says it; if he seems stressed, tired, low, or excited, acknowledge it before jumping to business. Remember details he's shared before (they're listed below as memory notes) and weave them in naturally rather than reciting them back like a file lookup. Be direct and useful when he needs that, but don't be clinical — you're building an ongoing relationship with him, not resetting every conversation. Since replies are read aloud, keep them short — 1 to 3 sentences unless he asks for more detail.";
 
 const ACTION_CAPABILITY_PROMPT = `You can actually open things in Adeel's browser — you're not limited to explaining how. When he asks you to open a website, search for something, or play a song/video, DO it rather than telling him how to do it himself. To do it, put exactly one line at the very end of your reply, on its own with nothing after it, in one of these exact forms (the system executes it and removes it before anything is spoken, so it's invisible to Adeel):
 ACTION: open <sitename>
@@ -1085,7 +1085,7 @@ async function callAnthropic(apiKey, { tools, attachments } = {}) {
 async function callOpenAI(apiKey, { tools, attachments } = {}) {
   // OpenAI's API has no CORS support, so a browser page can never call it
   // directly (Anthropic's API is the exception). This goes through the
-  // local Rencho server instead, which makes the actual OpenAI call
+  // local Sarah server instead, which makes the actual OpenAI call
   // server-side and hands the reply back — only works when this page is
   // loaded from http://127.0.0.1:8765, not as a file:// path.
   const payload = {
@@ -1114,7 +1114,7 @@ async function callOpenAI(apiKey, { tools, attachments } = {}) {
   let toolCall = null;
   if (tc && tc.function) {
     try { toolCall = { name: tc.function.name, input: JSON.parse(tc.function.arguments) }; }
-    catch (e) { console.warn('Rencho: tool_call arguments failed to parse', tc.function.arguments); }
+    catch (e) { console.warn('Sarah: tool_call arguments failed to parse', tc.function.arguments); }
   }
   return { text: text || '(empty response)', toolCall };
 }
@@ -1140,7 +1140,7 @@ async function sendToBrain(userText, attachments = [], opts = {}) {
     const { text: rawText, toolCall } = provider === 'openai'
       ? await callOpenAI(apiKey, { tools, attachments })
       : await callAnthropic(apiKey, { tools, attachments });
-    console.log('[Rencho raw reply]', rawText, toolCall); // temporary debug aid
+    console.log('[Sarah raw reply]', rawText, toolCall); // temporary debug aid
 
     let replyText;
     if (toolCall && toolCall.name === 'github_api') {
@@ -1189,10 +1189,10 @@ function speak(text, { continueConversation = true } = {}) {
   window.speechSynthesis.speak(utter);
 }
 
-// After Rencho finishes talking, briefly reopen the mic for a follow-up
+// After Sarah finishes talking, briefly reopen the mic for a follow-up
 // instead of dropping back to wake-word mode — like a real back-and-forth.
 // If you don't say anything, the normal speech-recognition silence timeout
-// (a few seconds) ends it and it falls back to waiting for "Rencho" again.
+// (a few seconds) ends it and it falls back to waiting for "Sarah" again.
 function resumeConversationListening() {
   setTimeout(() => {
     if (currentState === 'idle' && !listening) startListening();
@@ -1235,7 +1235,7 @@ if (SpeechRecognitionCtor) {
 function cleanupAudioViz() {
   listening = false;
   audioLevel = 0;
-  micHint.textContent = wakeModeWanted ? 'Say "Rencho" or tap to talk' : 'Tap to talk · hold for manual';
+  micHint.textContent = wakeModeWanted ? 'Say "Sarah" or tap to talk' : 'Tap to talk · hold for manual';
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
 }
@@ -1287,7 +1287,7 @@ function stopListening() {
   }
 }
 
-/* ============ Local actions: things Rencho actually does, no AI call needed ============ */
+/* ============ Local actions: things Sarah actually does, no AI call needed ============ */
 const ACTION_SITES = {
   youtube: 'https://www.youtube.com', gmail: 'https://mail.google.com', email: 'https://mail.google.com',
   calendar: 'https://calendar.google.com', maps: 'https://maps.google.com', news: 'https://news.google.com',
@@ -1303,7 +1303,7 @@ function openTab(url) {
 
 // Returns a spoken reply string if it fully handled the request locally,
 // or null to fall through to the AI as normal.
-// Strip natural lead-ins ("can you", "hey rencho, please", ...) so intent
+// Strip natural lead-ins ("can you", "hey sarah, please", ...) so intent
 // matching isn't thrown off by how the request is phrased.
 function stripLeadIn(text) {
   let s = text;
@@ -1312,7 +1312,7 @@ function stripLeadIn(text) {
     changed = false;
     const before = s;
     s = s.replace(/^(hey|ok|okay|yo)[,\s]+/i, '');
-    s = s.replace(/^(rencho)[,\s]+/i, '');
+    s = s.replace(/^(sarah)[,\s]+/i, '');
     s = s.replace(/^(can|could|would|will)\s+you\s+/i, '');
     s = s.replace(/^(please|pls)[,\s]+/i, '');
     s = s.replace(/^i\s+(want|need)\s+(you\s+to|to)\s+/i, '');
@@ -1411,11 +1411,11 @@ micBtn.addEventListener('click', () => {
   else stopListening();
 });
 
-/* ============ Wake word: say "Rencho" to start talking, no tap needed ============ */
-// Common ways "Rencho" gets misheard by the browser's speech recognizer,
+/* ============ Wake word: say "Sarah" to start talking, no tap needed ============ */
+// Common ways "Sarah" gets misheard by the browser's speech recognizer,
 // matched loosely so the wake word still fires on an imperfect transcript.
-const WAKE_REGEX = /\b(rencho|ren\s?cho|wren\s?cho|ren\s?show|rancho|renshaw)\b/i;
-let awaitingCommand = false; // true from the moment we hear "Rencho" until we actually start capturing the command
+const WAKE_REGEX = /\b(sarah|sara|sarrah|sahra)\b/i;
+let awaitingCommand = false; // true from the moment we hear "Sarah" until we actually start capturing the command
 
 function buildWakeRecognition() {
   const wr = new SpeechRecognitionCtor();
@@ -1446,7 +1446,7 @@ function onWakeWordHeard() {
   if (awaitingCommand || listening || currentState !== 'idle') return;
   awaitingCommand = true;
   try { wakeRecognition.stop(); } catch (e) { /* not running */ }
-  toast('Rencho — listening…');
+  toast('Sarah — listening…');
   const beginCommand = () => { awaitingCommand = false; startListening(); };
   if ('speechSynthesis' in window && !muted) {
     const ack = new SpeechSynthesisUtterance('Yes?');
@@ -1466,7 +1466,7 @@ function startWakeMode() {
   wakeModeWanted = true;
   if (!wakeRecognition) wakeRecognition = buildWakeRecognition();
   try { wakeRecognition.start(); } catch (e) { /* already running */ }
-  micHint.textContent = 'Say "Rencho" or tap to talk';
+  micHint.textContent = 'Say "Sarah" or tap to talk';
 }
 
 // On by default whenever the browser supports it — no setup needed.

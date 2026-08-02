@@ -1,8 +1,8 @@
 """
-Rencho wake-word listener.
+Sarah wake-word listener.
 
-Listens continuously and offline (via Vosk) for the word "Rencho" and opens
-the Rencho avatar UI in your default browser as soon as it hears it.
+Listens continuously and offline (via Vosk) for the word "Sarah" and opens
+the Sarah avatar UI in your default browser as soon as it hears it.
 
 Requires:
     pip install vosk sounddevice
@@ -24,24 +24,22 @@ from vosk import KaldiRecognizer, Model
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "model"
-LOG_FILE = BASE_DIR / "rencho_listener.log"
+LOG_FILE = BASE_DIR / "sarah_listener.log"
 
-# Served via the local HTTP server (run_rencho_server.vbs) rather than
+# Served via the local HTTP server (run_sarah_server.vbs) rather than
 # opened as a file:// path — Chrome does NOT reliably remember microphone
 # permission for file:// pages, so it re-prompts every time. Over
 # http://localhost it's treated as a stable, trustworthy origin and the
 # mic permission grant sticks for good.
-AVATAR_URL = "http://127.0.0.1:8765/jarvis-avatar-ui.html"
+AVATAR_URL = "http://127.0.0.1:8765/sarah-avatar-ui.html"
 
-# Common ways "Rencho" gets mis-heard by speech recognizers, so the wake
+# Common ways "Sarah" gets mis-heard by speech recognizers, so the wake
 # word still triggers even if it's not transcribed perfectly.
 WAKE_PATTERNS = [
-    r"\brencho\b",
-    r"\bren\s?cho\b",
-    r"\bwren\s?cho\b",
-    r"\bren\s?show\b",
-    r"\brancho\b",
-    r"\brenshaw\b",
+    r"\bsarah\b",
+    r"\bsara\b",
+    r"\bsarrah\b",
+    r"\bsahra\b",
 ]
 WAKE_REGEX = re.compile("|".join(WAKE_PATTERNS), re.IGNORECASE)
 
@@ -59,7 +57,7 @@ def log(msg: str) -> None:
         pass
 
 
-def open_rencho() -> None:
+def open_sarah() -> None:
     log(f"Wake word detected -> opening {AVATAR_URL}")
     webbrowser.open(AVATAR_URL)
 
@@ -81,7 +79,7 @@ def main() -> None:
         audio_q.put(bytes(indata))
 
     last_trigger = 0.0
-    log("Rencho listener started. Say 'Rencho' anytime to open the avatar.")
+    log("Sarah listener started. Say 'Sarah' anytime to open the avatar.")
 
     with sd.RawInputStream(
         samplerate=SAMPLE_RATE,
@@ -103,7 +101,7 @@ def main() -> None:
                 now = time.time()
                 if now - last_trigger > COOLDOWN_SECONDS:
                     last_trigger = now
-                    open_rencho()
+                    open_sarah()
                 rec.Reset()
 
 

@@ -1,5 +1,5 @@
 """
-Rencho local server.
+Sarah local server.
 
 Three jobs:
 1. Serves the BRAIN folder over http://127.0.0.1:8765 so the avatar page
@@ -31,7 +31,7 @@ import urllib.request
 from pathlib import Path
 
 PORT = 8765
-BASE_DIR = Path(r"C:\Users\asid3\Documents\BRAIN\Rencho")
+BASE_DIR = Path(__file__).resolve().parent  # portable: Mac + Windows
 OPENAI_PROXY_PATH = "/proxy/openai"
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 GITHUB_PROXY_PATH = "/proxy/github"
@@ -46,7 +46,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass  # quiet — runs silently in the background via pythonw
 
     def end_headers(self):
-        # Serving jarvis-avatar-ui.html over http:// (instead of file://)
+        # Serving sarah-avatar-ui.html over http:// (instead of file://)
         # means the browser can now cache it like a normal web page — which
         # has repeatedly caused edits to silently not take effect even after
         # a reload. Force every response to be treated as always-stale.
@@ -126,7 +126,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "X-GitHub-Api-Version": "2022-11-28",
                 "Content-Type": "application/json",
                 # GitHub's API rejects requests with no User-Agent.
-                "User-Agent": "Rencho-local-assistant",
+                "User-Agent": "Sarah-local-assistant",
             },
             method=method,
         )

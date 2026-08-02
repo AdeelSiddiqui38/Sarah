@@ -1,24 +1,24 @@
-# Rencho — Project State (read this first)
+# Sarah — Project State (read this first)
 
-This file is the persistent memory for the Rencho project. A new Claude/Cowork
+This file is the persistent memory for the Sarah project. A new Claude/Cowork
 session has no memory of past conversations — if you're picking this project
 back up, read this file fully before doing anything else. Keep it updated as
 things change; treat it as the single source of truth for "what's already
 built" so work doesn't get redone or contradicted.
 
-## What Rencho is
+## What Sarah is
 
 Adeel's personal, always-on JARVIS-style executive assistant and companion.
 Three parts, loosely connected:
 
-1. **The avatar** — `BRAIN\Rencho\jarvis-avatar-ui.html` (moved into the
-   Rencho folder so the repo and the live-served file are the same; served at
-   http://127.0.0.1:8765/jarvis-avatar-ui.html), a standalone browser page
+1. **The avatar** — `BRAIN\Sarah\sarah-avatar-ui.html` (moved into the
+   Sarah folder so the repo and the live-served file are the same; served at
+   http://127.0.0.1:8765/sarah-avatar-ui.html), a standalone browser page
    with voice in/out AND a typed composer (with image/doc attach), a glowing
    cyan halo-core visual with 10 labeled specialist-agent nodes orbiting it
    (APEX-inspired look), and a direct chat connection to Claude or ChatGPT
    (user's own API key).
-2. **The background services** — `BRAIN\Rencho\`, a local Python server +
+2. **The background services** — `BRAIN\Sarah\`, a local Python server +
    wake-word listener that make the avatar reachable by voice/icon without
    opening Claude, and proxy the OpenAI call server-side.
 3. **OpenJarvis** — `BRAIN\OpenJarvis\`, a separately-installed open-source
@@ -26,11 +26,11 @@ Three parts, loosely connected:
    the 8 specialist agents that need real tool access (inbox, calendar,
    research, etc.), run via the `jarvis` CLI.
 
-Brand name is **"Rencho"** (renamed from an earlier "BRAIN" placeholder name
+Brand name is **"Sarah"** (renamed from an earlier "BRAIN" placeholder name
 — the folder is still physically called BRAIN, that's just the directory,
 not the assistant's name).
 
-## The avatar — BRAIN\jarvis-avatar-ui.html
+## The avatar — BRAIN\sarah-avatar-ui.html
 
 Single self-contained HTML file, Canvas2D rendering (no Three.js). Current
 capabilities:
@@ -43,31 +43,31 @@ capabilities:
   speaking/acting/warning, driving color and pulse.
 - **Voice**: Web Speech API — `SpeechRecognition` for STT, `speechSynthesis`
   for TTS. Tap-mic-to-talk, plus:
-  - **In-page wake word**: continuously listens for "Rencho" while idle
-    (fuzzy-matched against mishearings: rencho/ren cho/wren cho/ren show/
+  - **In-page wake word**: continuously listens for "Sarah" while idle
+    (fuzzy-matched against mishearings: sarah/ren cho/wren cho/ren show/
     rancho/renshaw) and auto-starts listening when heard, with a spoken
     "Yes?" ack.
-  - **Conversational follow-up**: after Rencho replies, it reopens the mic
-    briefly for a follow-up instead of requiring "Rencho" again each turn;
+  - **Conversational follow-up**: after Sarah replies, it reopens the mic
+    briefly for a follow-up instead of requiring "Sarah" again each turn;
     falls back to wake-word mode after a silence timeout.
 - **AI provider**: Settings (gear icon) lets you pick **Claude (Anthropic)**
   or **ChatGPT (OpenAI)**, each with its own saved key. Claude calls
   `api.anthropic.com` directly from the browser (uses Anthropic's
   browser-access header). **OpenAI cannot be called directly from a
-  browser (no CORS support)** — it's proxied through the local Rencho
+  browser (no CORS support)** — it's proxied through the local Sarah
   server instead (`POST /proxy/openai`, see below). OpenAI model is
   configurable in Settings (default `gpt-4o-mini`) since OpenAI projects
   can restrict which models a key may use.
-- **Personality**: `DEFAULT_SYSTEM_PROMPT` frames Rencho as a warm,
+- **Personality**: `DEFAULT_SYSTEM_PROMPT` frames Sarah as a warm,
   mood-aware companion, not just a task-taker — checks in on how Adeel's
   doing, references memory naturally, keeps replies short since they're
   read aloud (1–3 sentences unless asked for more).
 - **Persistent memory**:
   - Last ~30 messages of conversation persist in `localStorage`
-    (`brain_config_v1` key) and replay into the transcript on reload —
+    (`sarah_config_v1` key) and replay into the transcript on reload —
     continuity across sessions instead of starting blank.
   - `config.memoryNotes` — a free-text running list of durable facts,
-    editable in Settings under "What Rencho Remembers," injected into
+    editable in Settings under "What Sarah Remembers," injected into
     every system prompt. Say **"remember that ___"** anytime (handled
     locally, no AI call) and it's appended permanently.
   - "Clear memory & history" button in Settings wipes both.
@@ -87,31 +87,31 @@ capabilities:
     redirects from http://127.0.0.1:8765" → never blocked again. Same
     pattern as the mic-permission fix below.
 
-## BRAIN\Rencho\ — background services
+## BRAIN\Sarah\ — background services
 
-- **`rencho_server.py`** — local Python HTTP server on
-  `http://127.0.0.1:8765`, serves the `BRAIN\Rencho` folder (BASE_DIR was
-  changed from BRAIN root to the Rencho folder) so the avatar has a stable
+- **`sarah_server.py`** — local Python HTTP server on
+  `http://127.0.0.1:8765`, serves the `BRAIN\Sarah` folder (BASE_DIR was
+  changed from BRAIN root to the Sarah folder) so the avatar has a stable
   origin, and proxies both OpenAI chat calls (`POST /proxy/openai`) and GitHub
   REST calls (`POST /proxy/github`) server-side (bypasses their lack of CORS).
   Forces Cache-Control: no-store on every response. Started
-  via `run_rencho_server.vbs` (silent, no console window).
+  via `run_sarah_server.vbs` (silent, no console window).
   - **Why a local server exists at all**: Chrome does NOT reliably
     remember microphone permission for `file://` pages — it re-prompts
     every time. Serving over `http://127.0.0.1` fixed that permanently
     (one-time mic permission grant, then it sticks).
-- **`rencho_listener.py`** — offline, free wake-word listener using
-  **Vosk** (small English model in `Rencho\model\`, downloaded once,
+- **`sarah_listener.py`** — offline, free wake-word listener using
+  **Vosk** (small English model in `Sarah\model\`, downloaded once,
   ~40MB) + `sounddevice`. Listens system-wide (even with no browser open)
-  for "Rencho" (with the same fuzzy mishearing list as the in-page wake
-  word) and opens `http://127.0.0.1:8765/jarvis-avatar-ui.html` in the
-  default browser when heard. Started via `run_rencho_listener.vbs`.
-  Logs to `rencho_listener.log`.
-- **Desktop icon**: `Rencho.url` (an Internet Shortcut, not a `.lnk`,
+  for "Sarah" (with the same fuzzy mishearing list as the in-page wake
+  word) and opens `http://127.0.0.1:8765/sarah-avatar-ui.html` in the
+  default browser when heard. Started via `run_sarah_listener.vbs`.
+  Logs to `sarah_listener.log`.
+- **Desktop icon**: `Sarah.url` (an Internet Shortcut, not a `.lnk`,
   because it needs to open a URL) pointing at the avatar's localhost URL,
-  copied to the real Windows Desktop. Custom icon at `Rencho.ico` /
-  `Rencho2.ico` (had to rename to bust Windows' aggressive icon-cache;
-  `Rencho2.ico` is the one actually referenced by the shortcut now).
+  copied to the real Windows Desktop. Custom icon at `Sarah.ico` /
+  `Sarah2.ico` (had to rename to bust Windows' aggressive icon-cache;
+  `Sarah2.ico` is the one actually referenced by the shortcut now).
 - **Autostart**: both the server and the listener have shortcuts in the
   Windows Startup folder (`shell:startup`) so they launch silently at
   login. Both currently running as `pythonw.exe` (no console window) —
@@ -138,7 +138,7 @@ capabilities:
   (`deploy/windows/install.ps1`), with `$env:OPENJARVIS_HOME` pointed at
   `BRAIN\OpenJarvis` so all runtime state (config, memory index, personas)
   lives inside BRAIN, not scattered in `~/.openjarvis`.
-- **`SOUL.md`** (root persona) — identifies as Rencho, lists all 10
+- **`SOUL.md`** (root persona) — identifies as Sarah, lists all 10
   specialists and how to invoke them (`jarvis ask --persona <name> "..."`).
 - **`personas\<name>\SOUL.md`** — one file per specialist, written for:
   strategist, researcher (paired with the built-in `deep_research` agent),
@@ -195,40 +195,40 @@ capabilities:
 ## Current state — what's built and live (updated 2026-07-25)
 
 ### GitHub control (DONE — this was the big open thread)
-- Rencho has real read/write GitHub access via **native LLM tool-calling**
+- Sarah has real read/write GitHub access via **native LLM tool-calling**
   (Anthropic `tools`/`tool_use`, OpenAI `tools`/`tool_calls`) — a `github_api`
   tool the model calls directly. This replaced an earlier free-text
   `ACTION: github {...}` marker that proved unreliable (the model kept
   forgetting to emit the line). open/search/play still use the ACTION-marker
   path; only GitHub moved to tool-calling.
-- Server side: `POST /proxy/github` in `rencho_server.py` — generic
+- Server side: `POST /proxy/github` in `sarah_server.py` — generic
   method+path+body forwarder to api.github.com, adds the PAT server-side
   (mirrors the OpenAI proxy). The PAT lives only in the browser's localStorage
   (Settings → "GitHub Personal Access Token"), never in a file.
 - Safety honored: GET runs immediately; POST/PUT/PATCH/DELETE stage a
   `pendingGithubAction` and require a spoken/typed "yes" before firing.
 
-### Rencho avatar — recent changes
-- **Composer** ("Talk to Rencho" panel, replaced Demo State Controls): type
+### Sarah avatar — recent changes
+- **Composer** ("Talk to Sarah" panel, replaced Demo State Controls): type
   instructions (Enter to send), plus **paste/attach images and documents**.
   Images downscale→base64 to the vision model; PDFs (pdf.js CDN) and text files
   are read and passed as text. Attachments never persisted. Typed input runs the
   same pipeline as voice (actions, GitHub tool, confirm-before-write). Vision
   needs a vision model (Claude default fine; OpenAI use gpt-4o/gpt-4o-mini).
-- Header renamed to "RENCHO"; right-side demo panels (Active Tasks/Status/
+- Header renamed to "SARAH"; right-side demo panels (Active Tasks/Status/
   Session Memory) hidden (display:none, elements kept so JS refs don't break).
 
-### GitHub sync of the Rencho project itself
-- `BRAIN\Rencho` is a git repo pushed to **github.com/AdeelSiddiqui38/Rancho**
-  (private). Kept in sync with **`Rencho-Sync.bat`** (double-click → add/commit/
+### GitHub sync of the Sarah project itself
+- `BRAIN\Sarah` is a git repo pushed to **github.com/AdeelSiddiqui38/Rancho**
+  (private). Kept in sync with **`Sarah-Sync.bat`** (double-click → add/commit/
   push). Git runs natively on the PC (Git Bash/PowerShell); the sandbox CANNOT
   run git on the FUSE mount (lock files can't be unlinked). `.gitignore` excludes
-  the Vosk model, logs, icon scratch PNGs. After Claude edits Rencho files, user
-  runs Rencho-Sync.bat and reloads the page.
+  the Vosk model, logs, icon scratch PNGs. After Claude edits Sarah files, user
+  runs Sarah-Sync.bat and reloads the page.
 
-## APEX Physiotherapy website — Rencho-controlled (NEW, in progress)
+## APEX Physiotherapy website — Sarah-controlled (NEW, in progress)
 
-Goal: Rencho controls the APEX Physiotherapy & Wellness Clinic website — repo
+Goal: Sarah controls the APEX Physiotherapy & Wellness Clinic website — repo
 AND live site.
 
 - **Business**: Apex Physio & Wellness Clinic, Unit 150, 246 Nolanridge Crescent
@@ -246,10 +246,10 @@ AND live site.
   (www.whc.ca is the HOST, not the clinic site — easy point of confusion.)
 - **Deployment DECISION**: static + **auto-deploy via Netlify** (NOT GitHub Pages —
   the booking form posts to `send-booking.php`, and Pages can't run PHP). Netlify
-  auto-deploys from the repo (keeps Rencho in control via GitHub) and has built-in
+  auto-deploys from the repo (keeps Sarah in control via GitHub) and has built-in
   form handling to replace the PHP. Publish directory = `apexphysio`.
 - **Original plan (superseded)**: PROJECT_STATUS.md documented WordPress+Elementor
-  on WHC — rejected because it isn't practically Rencho-controllable.
+  on WHC — rejected because it isn't practically Sarah-controllable.
 - **PAUSED HERE — next steps** when resuming:
   1. Convert the booking form in `apexphysio/index.html` from the PHP handler to
      **Netlify Forms** (add `data-netlify="true"`, drop the `.php` action; retire
