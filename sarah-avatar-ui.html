@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Sarah</title>
+<title>SARAH</title>
+<link rel="icon" href="/Sarah2.ico">
 <style>
   :root{
     --bg:#05070d;
@@ -50,6 +51,18 @@
   .msg.assistant{background:#141824;color:var(--text);align-self:flex-start;border:1px solid var(--panel-border);}
   .msg .who{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);display:block;margin-bottom:3px;}
 
+  .proj-list{display:flex;flex-direction:column;gap:6px;max-height:38vh;overflow-y:auto;}
+  .proj-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--panel-border);border-radius:9px;background:#101522;cursor:pointer;transition:all .18s;}
+  .proj-item:hover{border-color:var(--accent);background:#141b2c;}
+  .proj-item .pname{flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .proj-item .pnum{flex:none;font-size:10px;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+  .proj-item .prm{flex:none;color:var(--text-dim);font-size:12px;padding:0 2px;}
+  .proj-item .prm:hover{color:var(--warn);}
+  /* amber = name known but no claude.ai link yet; matches its orbit node */
+  .proj-item.unlinked{border-color:rgba(230,170,60,.35);}
+  .proj-item.unlinked .pname{color:rgba(230,170,60,.92);}
+  .proj-item.unlinked:hover{border-color:rgba(230,170,60,.8);}
+  .proj-empty{font-size:11.5px;color:var(--text-dim);line-height:1.5;}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
   .chip{pointer-events:auto;border:1px solid var(--panel-border);background:#101522;color:var(--text);font-size:12px;padding:6px 12px;border-radius:16px;cursor:pointer;transition:all .2s;}
   .chip:hover{border-color:var(--accent);color:var(--accent);}
@@ -172,18 +185,33 @@
       </div>
     </div>
 
+    <!-- Right rail is hidden: the orbiting constellation IS the projects UI now,
+         so this panel was duplicating it. Kept in the DOM (not deleted) because
+         renderProjects() still writes #projectList and createTask() writes
+         #taskList — and flipping this back on is then a one-word change. The
+         Add/Import/All-projects buttons were moved into Settings ⚙ so they stay
+         reachable while this is hidden. -->
     <div class="rail rail-right" style="display:none;">
+      <div class="panel">
+        <h3>Claude Projects</h3>
+        <div id="projectList" class="proj-list"></div>
+      </div>
       <div class="panel">
         <h3>Active Tasks</h3>
         <div id="taskList" style="display:flex;flex-direction:column;gap:8px;"></div>
       </div>
-      <div class="panel">
+      <!-- Placeholder panels: the calendar/inbox/memory numbers below are still
+           hard-coded mock values, so they stay hidden now that the right rail is
+           visible. #connectionStat is real and kept in the DOM for
+           updateConnectionStat(). Flip these back on once they're wired to
+           real data. -->
+      <div class="panel" style="display:none;">
         <h3>Status</h3>
         <div class="stat-row"><span>Calendar today</span><span class="num" id="calStat">3 meetings</span></div>
         <div class="stat-row"><span>Inbox</span><span class="num" id="inboxStat">12 unread</span></div>
         <div class="stat-row"><span>Connection</span><span class="num" id="connectionStat" style="color:var(--warn)">No API key</span></div>
       </div>
-      <div class="panel">
+      <div class="panel" style="display:none;">
         <h3>Session Memory</h3>
         <div class="memory-line">• Prefers concise, direct responses</div>
         <div class="memory-line">• Timezone: local</div>
@@ -241,6 +269,16 @@
       <div style="display:flex;justify-content:flex-end;margin:0 0 14px;">
         <button type="button" class="btn btn-reject" id="clearMemoryBtn" style="padding:4px 10px;font-size:11px;">Clear memory &amp; history</button>
       </div>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">Claude Projects</label>
+      <textarea id="projectsInput" rows="5" placeholder="One per line:&#10;APEX Physiotherapy | https://claude.ai/project/xxxxxxxx&#10;Sarah | https://claude.ai/project/yyyyyyyy"
+        style="width:100%;margin:6px 0 4px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;"></textarea>
+      <div class="chips" style="margin:0 0 8px;">
+        <button type="button" class="chip" id="projectAddBtn">＋ Add</button>
+        <button type="button" class="chip" id="projectImportBtn">⤓ Import</button>
+        <button type="button" class="chip" id="projectAllBtn">All projects ↗</button>
+        <span id="projectCount" style="font-size:11px;color:var(--text-dim);align-self:center;margin-left:auto;"></span>
+      </div>
+      <p style="font-size:11px;color:var(--text-dim);margin:0 0 14px;line-height:1.5;">These are the nodes orbiting the core — click one there to open it, or say <i>"open my APEX project"</i>. Anthropic publishes no API that lists claude.ai Projects, so the list lives here. <b>Import</b> pulls them from claude.ai in one paste and attaches the real links (amber nodes → cyan).</p>
       <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">GitHub Personal Access Token</label>
       <input type="password" id="githubTokenInput" placeholder="ghp_..." autocomplete="off"
         style="width:100%;margin:6px 0 4px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
@@ -342,21 +380,36 @@ function setState(state) {
   }
 }
 
-/* ============ AGENT CONSTELLATION — APEX-style labeled nodes around the core ============ */
-const AGENTS = [
-  { label: 'Strategist',    gold: false },
-  { label: 'Researcher',    gold: false },
-  { label: 'Chief of Staff',gold: false },
-  { label: 'Finance',       gold: false },
-  { label: 'Editor',        gold: false },
-  { label: 'Memory',        gold: false },
-  { label: 'Sales',         gold: true  },
-  { label: 'Marketing',     gold: true  },
-  { label: 'Design',        gold: false },
-  { label: 'Culture',       gold: false },
-].map((a, i, arr) => ({ ...a, angle: (i / arr.length) * Math.PI * 2 - Math.PI / 2, wobble: Math.random() * Math.PI * 2 }));
-
+/* ============ PROJECT CONSTELLATION — orbiting nodes are the real Claude Projects ============
+   These used to be ten decorative labels (Strategist, Researcher, Culture...).
+   They're now driven entirely by the same `config.claudeProjects` list that
+   feeds the right-rail panel and the voice commands, so all three stay in sync
+   from one source. Each node is clickable; hit-testing is done against boxes
+   recorded during draw(), because the nodes rotate, wobble and zoom — computing
+   the geometry twice would drift out of sync with what's actually on screen.
+   Amber node = no URL yet (name known, not linked). Cyan = clickable. */
 const GOLD = [230, 170, 60];
+const ORBIT_MAX_LABEL = 22;   // longer names overflow into the side rails
+const ORBIT_HIT_PAD = 9;      // clicks near a small dot should still land
+
+let orbitNodes = [];   // rebuilt only when the project list changes
+let orbitHits = [];    // screen-space boxes, rewritten every frame by draw()
+let hoveredOrbit = null;
+
+function rebuildOrbit() {
+  const list = getProjects();
+  orbitNodes = list.map((p, i) => ({
+    project: p,
+    label: p.name.length > ORBIT_MAX_LABEL
+      ? p.name.slice(0, ORBIT_MAX_LABEL - 1).trimEnd() + '…'
+      : p.name,
+    unlinked: !p.url,
+    angle: (i / list.length) * Math.PI * 2 - Math.PI / 2,
+    wobble: Math.random() * Math.PI * 2,
+    // Past ~10 nodes the labels start colliding, so alternate two radii.
+    ring: list.length > 10 ? (i % 2) : 0,
+  }));
+}
 
 /* ============ ANIMATION LOOP ============ */
 // Rotation never stops — speed just shifts with state, so the avatar always reads as "live".
@@ -435,22 +488,24 @@ function draw(col, colA, coreScale) {
   }
   ctx2d.restore();
 
-  // ---- agent constellation: connector lines + labeled nodes ----
-  AGENTS.forEach(agent => {
-    const wobble = Math.sin(hudT * 0.3 + agent.wobble) * 6;
-    const angle = agent.angle + constellationDrift;
-    const r = constellationR + wobble;
+  // ---- project constellation: connector lines + clickable labeled nodes ----
+  orbitHits = [];
+  orbitNodes.forEach((node, i) => {
+    const wobble = Math.sin(hudT * 0.3 + node.wobble) * 6;
+    const angle = node.angle + constellationDrift;
+    const r = constellationR + wobble + node.ring * 46;
     const nx = Math.cos(angle) * r;
     const ny = Math.sin(angle) * r;
     const edgeX = Math.cos(angle) * (haloR + 6);
     const edgeY = Math.sin(angle) * (haloR + 6);
 
-    const dotA = agent.gold ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.95)` : colA(0.9);
-    const lineA = agent.gold ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.35)` : colA(0.28);
+    const hot = hoveredOrbit === i;
+    const dotA  = node.unlinked ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.95)` : colA(hot ? 1 : 0.9);
+    const lineA = node.unlinked ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.35)` : colA(hot ? 0.6 : 0.28);
 
     // connector line, slight elbow toward the node
     ctx2d.strokeStyle = lineA;
-    ctx2d.lineWidth = 1;
+    ctx2d.lineWidth = hot ? 1.6 : 1;
     ctx2d.beginPath();
     ctx2d.moveTo(edgeX, edgeY);
     ctx2d.lineTo(nx * 0.9, ny * 0.9);
@@ -460,20 +515,44 @@ function draw(col, colA, coreScale) {
     // node dot with glow
     ctx2d.save();
     ctx2d.shadowColor = dotA;
-    ctx2d.shadowBlur = 8;
+    ctx2d.shadowBlur = hot ? 16 : 8;
     ctx2d.fillStyle = dotA;
     ctx2d.beginPath();
-    ctx2d.arc(nx, ny, 4, 0, Math.PI * 2);
+    ctx2d.arc(nx, ny, hot ? 6 : 4, 0, Math.PI * 2);
     ctx2d.fill();
     ctx2d.restore();
 
     // label, anchored away from center so text reads outward
     const rightSide = Math.cos(angle) >= 0;
-    ctx2d.fillStyle = agent.gold ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},0.9)` : colA(0.85);
-    ctx2d.font = '11px Consolas, monospace';
+    const labelX = nx + (rightSide ? 10 : -10);
+    ctx2d.fillStyle = node.unlinked
+      ? `rgba(${GOLD[0]},${GOLD[1]},${GOLD[2]},${hot ? 1 : 0.9})`
+      : colA(hot ? 1 : 0.85);
+    ctx2d.font = (hot ? 'bold ' : '') + '11px Consolas, monospace';
     ctx2d.textAlign = rightSide ? 'left' : 'right';
     ctx2d.textBaseline = 'middle';
-    ctx2d.fillText(agent.label, nx + (rightSide ? 10 : -10), ny);
+    ctx2d.fillText(node.label, labelX, ny);
+
+    const tw = ctx2d.measureText(node.label).width;
+    if (hot) {
+      // underline the hovered label so it reads as a link
+      ctx2d.strokeStyle = ctx2d.fillStyle;
+      ctx2d.lineWidth = 1;
+      ctx2d.beginPath();
+      ctx2d.moveTo(rightSide ? labelX : labelX - tw, ny + 8);
+      ctx2d.lineTo(rightSide ? labelX + tw : labelX, ny + 8);
+      ctx2d.stroke();
+    }
+
+    // Record the hit box in SCREEN space (canvas is transformed by translate +
+    // hudZoom above, so convert back out) covering both the dot and its label.
+    const x0 = Math.min(nx - ORBIT_HIT_PAD, rightSide ? labelX : labelX - tw);
+    const x1 = Math.max(nx + ORBIT_HIT_PAD, rightSide ? labelX + tw : labelX);
+    orbitHits.push({
+      index: i,
+      x0: cx + x0 * hudZoom, x1: cx + x1 * hudZoom,
+      y0: cy + (ny - 9) * hudZoom, y1: cy + (ny + 9) * hudZoom,
+    });
   });
 
   // ---- central halo / ring (APEX signature look) ----
@@ -534,6 +613,43 @@ function draw(col, colA, coreScale) {
 }
 
 animate(performance.now());
+
+/* ---- orbit interaction: hover highlight + click to open the project ----
+   Hit-tested against the boxes draw() recorded this frame. Iterated in reverse
+   so that where two labels overlap, the one painted on top is the one you get. */
+function orbitHitAt(clientX, clientY) {
+  for (let i = orbitHits.length - 1; i >= 0; i--) {
+    const h = orbitHits[i];
+    if (clientX >= h.x0 && clientX <= h.x1 && clientY >= h.y0 && clientY <= h.y1) return h.index;
+  }
+  return null;
+}
+
+function openOrbitProject(node) {
+  if (node.project.url) {
+    openTab(node.project.url);
+    toast(`Opening ${node.project.name}`);
+  } else {
+    // Name known but never linked — sending them to the wrong project would be
+    // worse than sending them to the list.
+    openTab(CLAUDE_PROJECTS_URL);
+    toast(`"${node.project.name}" has no link yet — run Import to make it open directly`, true);
+  }
+}
+
+canvas.addEventListener('mousemove', (e) => {
+  const hit = orbitHitAt(e.clientX, e.clientY);
+  if (hit !== hoveredOrbit) {
+    hoveredOrbit = hit;
+    canvas.style.cursor = hit === null ? '' : 'pointer';
+    canvas.title = hit === null ? '' : (orbitNodes[hit]?.project.name || '');
+  }
+});
+canvas.addEventListener('mouseleave', () => { hoveredOrbit = null; canvas.style.cursor = ''; canvas.title = ''; });
+canvas.addEventListener('click', (e) => {
+  const hit = orbitHitAt(e.clientX, e.clientY);
+  if (hit !== null && orbitNodes[hit]) openOrbitProject(orbitNodes[hit]);
+});
 setState('idle');
 
 /* ============ UI: transcript, tasks, toasts ============ */
@@ -776,6 +892,11 @@ function buildSystemPrompt() {
   const notes = (config.memoryNotes || '').trim();
   let prompt = `${base}\n\n${ACTION_CAPABILITY_PROMPT}`;
   if (notes) prompt += `\n\nThings you remember about Adeel from past conversations:\n${notes}`;
+  const projects = getProjects();
+  if (projects.length) {
+    prompt += `\n\nAdeel's Claude Projects, shown in the Projects panel. He can open any of them by saying "open my <name> project", and that opening is handled locally — you don't need to do anything for it. Use these names to know what he's working on when he refers to one:\n` +
+      projects.map(p => `- ${p.name}`).join('\n');
+  }
   return prompt;
 }
 
@@ -967,6 +1088,189 @@ if ('speechSynthesis' in window) {
 
 const memoryNotesInput = document.getElementById('memoryNotesInput');
 const githubTokenInput = document.getElementById('githubTokenInput');
+const projectsInput = document.getElementById('projectsInput');
+
+/* ============ Claude Projects ============
+   Anthropic's public API has no endpoint that lists claude.ai Projects — they
+   live behind the claude.ai web session, and this page (origin 127.0.0.1:8765)
+   can't read that cross-origin. So the list is kept locally in config, either
+   typed in Settings or bulk-pasted via the Import snippet, which is run in a
+   logged-in claude.ai tab and just reads the project links off the page.
+   Stored as "Name | URL" text so it stays hand-editable. */
+const CLAUDE_PROJECTS_URL = 'https://claude.ai/projects';
+
+// Seeded from Adeel's actual claude.ai project list so the constellation reads
+// correctly on first load. Names only — the URLs are the part Import fills in,
+// and a name with no URL still gets its orbit node (amber) and voice command.
+const DEFAULT_PROJECTS = [
+  'Apex Physio and Wellness Clinic',
+  'Ross Cameron Trading Strategy',
+  'project',
+  'Remedy Pills Pharmacy',
+  'Guz Engineering',
+  'BRAIN',
+  'How to use Claude',
+  'Siddiqui Empire',
+  'XERO Project',
+  'NBV',
+].join('\n');
+
+// Accepts "Name | URL", a bare URL, or a bare Name (project known but not yet
+// linked). Anything without a URL still counts — it just can't deep-link yet.
+function parseProjects(text) {
+  return (text || '').split('\n').map(line => {
+    const raw = line.trim();
+    if (!raw) return null;
+    const bar = raw.lastIndexOf('|');
+    let name = bar > -1 ? raw.slice(0, bar).trim() : '';
+    let url  = bar > -1 ? raw.slice(bar + 1).trim() : raw;
+    if (!/^https?:\/\//i.test(url)) {
+      const bare = raw.replace(/\|\s*$/, '').trim();
+      return bare ? { name: bare, url: '' } : null;
+    }
+    if (!name) name = decodeURIComponent(url.split('/').filter(Boolean).pop() || 'Project');
+    return { name, url };
+  }).filter(Boolean);
+}
+
+function projectsToText(list) {
+  return list.map(p => (p.url ? `${p.name} | ${p.url}` : p.name)).join('\n');
+}
+
+const normName = s => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
+function getProjects() { return parseProjects(config.claudeProjects); }
+
+function setProjects(list) {
+  config.claudeProjects = projectsToText(list);
+  saveConfig(config);
+  renderProjects();
+}
+
+// Seed on genuinely-first run only. An empty string means "I deleted them all",
+// which must not be undone on every reload — so test for the key being absent.
+if (config.claudeProjects === undefined) {
+  config.claudeProjects = DEFAULT_PROJECTS;
+  saveConfig(config);
+}
+
+function renderProjects() {
+  const el = document.getElementById('projectList');
+  const list = getProjects();
+  const unlinked = list.filter(p => !p.url).length;
+  rebuildOrbit();  // constellation, panel and voice all read the same list
+
+  // Add/Import run from inside the Settings modal now, so the textarea has to
+  // track them — otherwise a stale value would overwrite the import on Save.
+  if (projectsInput) projectsInput.value = config.claudeProjects || '';
+  const countEl = document.getElementById('projectCount');
+  if (countEl) {
+    countEl.textContent = list.length
+      ? `${list.length} project${list.length === 1 ? '' : 's'}${unlinked ? ` · ${unlinked} unlinked` : ' · all linked'}`
+      : 'none yet';
+    countEl.style.color = unlinked ? 'rgba(230,170,60,.9)' : 'var(--text-dim)';
+  }
+
+  if (!list.length) {
+    el.innerHTML = '<div class="proj-empty">No projects yet. Hit <b>Import</b> to pull them from claude.ai, or <b>Add</b> one by hand. Then say <i>"open my … project"</i>.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  list.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'proj-item' + (p.url ? '' : ' unlinked');
+    row.title = p.url || `${p.name} — no link yet, Import to open it directly`;
+    row.innerHTML = `<span class="pnum">${String(i + 1).padStart(2, '0')}</span>` +
+                    `<span class="pname"></span><span class="prm" title="Remove">✕</span>`;
+    row.querySelector('.pname').textContent = p.name;
+    row.addEventListener('click', () => {
+      if (p.url) { openTab(p.url); toast(`Opening ${p.name}`); }
+      else { openTab(CLAUDE_PROJECTS_URL); toast(`"${p.name}" has no link yet — run Import`, true); }
+    });
+    row.querySelector('.prm').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = getProjects();
+      next.splice(i, 1);
+      setProjects(next);
+      toast(`Removed ${p.name}`);
+    });
+    el.appendChild(row);
+  });
+  if (unlinked) {
+    const note = document.createElement('div');
+    note.className = 'proj-empty';
+    note.style.marginTop = '4px';
+    note.innerHTML = `<b>${unlinked}</b> not linked yet (amber). <b>Import</b> attaches the real claude.ai links.`;
+    el.appendChild(note);
+  }
+}
+
+// Loose match so speech recognition doesn't have to nail the exact title:
+// exact -> starts-with -> substring -> all spoken words present.
+function findProject(spoken) {
+  const q = (spoken || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  if (!q) return null;
+  const list = getProjects();
+  const norm = p => p.name.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  return list.find(p => norm(p) === q)
+      || list.find(p => norm(p).startsWith(q))
+      || list.find(p => norm(p).includes(q) || q.includes(norm(p)))
+      || list.find(p => { const n = norm(p); return q.split(/\s+/).every(w => n.includes(w)); })
+      || null;
+}
+
+document.getElementById('projectAllBtn').addEventListener('click', () => openTab(CLAUDE_PROJECTS_URL));
+
+document.getElementById('projectAddBtn').addEventListener('click', () => {
+  const url = prompt('Claude Project URL (from claude.ai — open the project and copy the address):');
+  if (!url || !/^https?:\/\//i.test(url.trim())) { if (url !== null) toast('That needs to be a full https:// URL', true); return; }
+  const name = (prompt('What should Sarah call it?') || '').trim();
+  const list = getProjects();
+  list.push({ name: name || 'Project', url: url.trim() });
+  setProjects(list);
+  toast(`Added ${name || 'project'}`);
+});
+
+// No API to call, so this hands over a snippet instead: run it in a logged-in
+// claude.ai tab, it copies every project as "Name | URL", paste it back here.
+const PROJECT_IMPORT_SNIPPET =
+  "copy([...new Map([...document.querySelectorAll('a[href*=\"/project/\"]')]" +
+  ".map(a => [a.href, a.textContent.trim().split('\\n')[0].trim()])" +
+  ".filter(([u, n]) => n))].map(([u, n]) => n + ' | ' + u).join('\\n'))";
+
+document.getElementById('projectImportBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(PROJECT_IMPORT_SNIPPET); } catch (e) { /* clipboard may be blocked */ }
+  openTab(CLAUDE_PROJECTS_URL);
+  toast('Snippet copied. In the claude.ai tab: F12 → Console → paste → Enter.');
+  const pasted = prompt(
+    'Step 1 — the claude.ai Projects tab just opened.\n' +
+    'Step 2 — press F12, open Console, paste (Ctrl+V), press Enter. That copies your project list.\n' +
+    'Step 3 — paste it here (Ctrl+V) and press OK.\n\n' +
+    'If the clipboard was blocked, the snippet is also in the browser console log here.',
+    ''
+  );
+  if (pasted === null) return;
+  const found = parseProjects(pasted).filter(p => p.url);
+  if (!found.length) { toast('Nothing importable in that paste — expected "Name | URL" lines', true); return; }
+  // Match on name first so the seeded name-only entries get their real links
+  // attached in place, keeping their orbit position, instead of duplicating.
+  const merged = getProjects();
+  let linked = 0, added = 0;
+  found.forEach(p => {
+    if (merged.some(x => x.url && x.url === p.url)) return;          // already linked
+    const slot = merged.find(x => !x.url && normName(x.name) === normName(p.name));
+    if (slot) { slot.url = p.url; slot.name = p.name; linked++; }
+    else { merged.push(p); added++; }
+  });
+  setProjects(merged);
+  const parts = [];
+  if (linked) parts.push(`linked ${linked}`);
+  if (added) parts.push(`added ${added}`);
+  toast(parts.length ? `Import: ${parts.join(', ')}` : 'Nothing new — already up to date');
+});
+console.log('[Sarah] Claude Projects import snippet — run this in a logged-in claude.ai tab:\n\n' + PROJECT_IMPORT_SNIPPET);
+
+renderProjects();
 
 document.getElementById('settingsBtn').addEventListener('click', () => {
   providerSelect.value = config.provider || 'anthropic';
@@ -974,6 +1278,7 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
   systemPromptInput.value = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
   memoryNotesInput.value = config.memoryNotes || '';
   githubTokenInput.value = config.githubToken || '';
+  projectsInput.value = config.claudeProjects || '';
   populateVoices();
   settingsModal.classList.remove('hidden');
 });
@@ -990,7 +1295,9 @@ document.getElementById('settingsSaveBtn').addEventListener('click', () => {
   config.voiceName = voiceSelect.value;
   config.memoryNotes = memoryNotesInput.value.trim();
   config.githubToken = githubTokenInput.value.trim();
+  config.claudeProjects = projectsInput.value.trim();
   saveConfig(config);
+  renderProjects();
   updateConnectionStat();
   settingsModal.classList.add('hidden');
   toast('Settings saved');
@@ -1323,6 +1630,14 @@ function stripLeadIn(text) {
   return s;
 }
 
+// Shared by every voice route into a project, so an unlinked one always says so
+// out loud rather than silently opening nothing.
+function speakOpenProject(p) {
+  if (p.url) { openTab(p.url); return `Opening your ${p.name} project.`; }
+  openTab(CLAUDE_PROJECTS_URL);
+  return `I know ${p.name}, but it isn't linked yet — I've opened your projects list. Hit Import on the panel and I'll be able to jump straight in next time.`;
+}
+
 function tryHandleAction(text) {
   const lower = stripLeadIn(text.toLowerCase().trim().replace(/[.!?]+$/, ''));
 
@@ -1349,6 +1664,30 @@ function tryHandleAction(text) {
     return `Searching for "${query}".`;
   }
 
+  // --- Claude Projects. Checked before the generic "open X" site handler so a
+  // project named e.g. "Drive" wins over the bookmark of the same name. ---
+  if (/^(list|show|what)\b.*\bprojects?\b/.test(lower) || /^projects?$/.test(lower)) {
+    const list = getProjects();
+    if (!list.length) return 'You have no Claude projects saved yet — hit Import on the Projects panel to pull them from claude.ai.';
+    return `You have ${list.length} project${list.length === 1 ? '' : 's'}: ${list.map(p => p.name).join(', ')}.`;
+  }
+
+  m = lower.match(/^(?:open|go to|switch to|pull up|launch)\s+(?:my\s+|the\s+)?(?:claude\s+)?projects?$/);
+  if (m) { openTab(CLAUDE_PROJECTS_URL); return 'Opening your Claude projects.'; }
+
+  m = lower.match(/^(?:open|go to|switch to|pull up|launch)\s+(?:my\s+|the\s+)?(?:claude\s+)?project\s+(.+)/)
+   || lower.match(/^(?:open|go to|switch to|pull up|launch)\s+(?:my\s+|the\s+)?(.+?)\s+(?:claude\s+)?project$/)
+   || lower.match(/^(?:open|go to|switch to|pull up|launch)\s+(?:my\s+|the\s+)?(.+?)\s+(?:on|in)\s+claude$/);
+  if (m) {
+    const wanted = m[1].trim();
+    const hit = findProject(wanted);
+    if (hit) return speakOpenProject(hit);
+    const list = getProjects();
+    return list.length
+      ? `I don't have a project called "${wanted}". I've got: ${list.map(p => p.name).join(', ')}.`
+      : `I don't have any Claude projects saved yet — hit Import on the Projects panel and I'll be able to open them by name.`;
+  }
+
   m = lower.match(/^open\s+(?:my\s+)?([a-z0-9 ]+)/);
   if (m) {
     const key = m[1].trim();
@@ -1357,6 +1696,9 @@ function tryHandleAction(text) {
       openTab(ACTION_SITES[siteKey]);
       return `Opening ${siteKey}.`;
     }
+    // A saved project beats guessing at "<word>.com".
+    const hit = findProject(key);
+    if (hit) return speakOpenProject(hit);
     if (/^[a-z0-9]+$/.test(key)) {
       openTab('https://www.' + key + '.com');
       return `Opening ${key}.com.`;

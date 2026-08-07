@@ -10,3 +10,7 @@ __pycache__/
 # Icon design scratch renders
 _preview*.png
 _sanity_check.png
+
+# Download artifact — just re-zips Sarah.command + Sarah-Launch.vbs, which are
+# already tracked loose. Ignored so Sarah-Sync.bat's `git add -A` skips it.
+files.zip

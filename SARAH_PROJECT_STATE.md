@@ -13,7 +13,7 @@ Three parts, loosely connected:
 
 1. **The avatar** — `BRAIN\Sarah\sarah-avatar-ui.html` (moved into the
    Sarah folder so the repo and the live-served file are the same; served at
-   http://127.0.0.1:8765/sarah-avatar-ui.html), a standalone browser page
+   http://127.0.0.1:8765/), a standalone browser page
    with voice in/out AND a typed composer (with image/doc attach), a glowing
    cyan halo-core visual with 10 labeled specialist-agent nodes orbiting it
    (APEX-inspired look), and a direct chat connection to Claude or ChatGPT
@@ -36,11 +36,15 @@ Single self-contained HTML file, Canvas2D rendering (no Three.js). Current
 capabilities:
 
 - **Visual**: central glowing cyan halo/ring core (not the earlier "JARVIS
-  HUD dashboard" look), 10 agent nodes on connector lines around it —
-  Strategist, Researcher, Chief of Staff, Finance, Editor, Memory, Sales,
-  Marketing, Design, Culture (labels copied verbatim from the "APEX"
-  reference Adeel showed). State machine: idle/listening/thinking/
-  speaking/acting/warning, driving color and pulse.
+  HUD dashboard" look), with labeled nodes on connector lines orbiting it.
+  State machine: idle/listening/thinking/speaking/acting/warning, driving
+  color and pulse.
+  - **2026-08-07: the orbit nodes are now the real Claude Projects.** They
+    used to be 10 hard-coded decorative labels (Strategist, Researcher, Chief
+    of Staff, Finance, Editor, Memory, Sales, Marketing, Design, Culture) from
+    the APEX reference. `const AGENTS` is GONE — don't reintroduce it. Nodes
+    are built by `rebuildOrbit()` from `getProjects()`, the same list behind
+    the panel and the voice commands.
 - **Voice**: Web Speech API — `SpeechRecognition` for STT, `speechSynthesis`
   for TTS. Tap-mic-to-talk, plus:
   - **In-page wake word**: continuously listens for "Sarah" while idle
@@ -96,6 +100,14 @@ capabilities:
   REST calls (`POST /proxy/github`) server-side (bypasses their lack of CORS).
   Forces Cache-Control: no-store on every response. Started
   via `run_sarah_server.vbs` (silent, no console window).
+  - **Root serves the avatar (2026-08-07)**: `send_head()` rewrites `/` and
+    `/index.html` → `/sarah-avatar-ui.html`, so the address bar reads just
+    `127.0.0.1:8765` and the tab reads **SARAH**. Deliberately a rewrite, not
+    a 302 — a redirect would put the long filename back in the address bar,
+    defeating the point. There's no `index.html` in the folder, so without
+    this `/` would serve a directory listing. All launchers (`Sarah.url`,
+    `Sarah-Launch.vbs`, `Sarah.command`, `sarah_listener.py`) now point at the
+    bare root; the long `/sarah-avatar-ui.html` URL still works.
   - **Why a local server exists at all**: Chrome does NOT reliably
     remember microphone permission for `file://` pages — it re-prompts
     every time. Serving over `http://127.0.0.1` fixed that permanently
@@ -104,20 +116,30 @@ capabilities:
   **Vosk** (small English model in `Sarah\model\`, downloaded once,
   ~40MB) + `sounddevice`. Listens system-wide (even with no browser open)
   for "Sarah" (with the same fuzzy mishearing list as the in-page wake
-  word) and opens `http://127.0.0.1:8765/sarah-avatar-ui.html` in the
+  word) and opens `http://127.0.0.1:8765/` in the
   default browser when heard. Started via `run_sarah_listener.vbs`.
   Logs to `sarah_listener.log`.
-- **Desktop icon**: `Sarah.url` (an Internet Shortcut, not a `.lnk`,
-  because it needs to open a URL) pointing at the avatar's localhost URL,
-  copied to the real Windows Desktop. Custom icon at `Sarah.ico` /
-  `Sarah2.ico` (had to rename to bust Windows' aggressive icon-cache;
-  `Sarah2.ico` is the one actually referenced by the shortcut now).
-- **Autostart**: both the server and the listener have shortcuts in the
-  Windows Startup folder (`shell:startup`) so they launch silently at
-  login. Both currently running as `pythonw.exe` (no console window) —
+- **Desktop icon (updated 2026-08-07)**: `Desktop\SARAH.lnk`, a `.lnk`
+  targeting **`Sarah-Launch.vbs`** — NOT `Sarah.url` and NOT the .html.
+  Going through the launcher matters: it starts the server if it isn't
+  already up, then opens the avatar, so a cold double-click works instead
+  of showing a connection-refused page. Icon is `Sarah2.ico` (`Sarah.ico`
+  is a byte-identical copy; the duplicate exists only to bust Windows'
+  icon cache). `Sarah.url` is still in the repo and still works.
+- **Autostart**: server + listener shortcuts in `shell:startup`, launched
+  silently at login. Both run as `pythonw.exe` (no console window) —
   **careful**: `taskkill /F /IM pythonw.exe` kills BOTH indiscriminately
-  since they share a process name; if you ever need to restart one, you
-  likely need to restart both.
+  since they share a process name; to restart just one, filter on
+  CommandLine (`Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'"`
+  then match `*sarah_server.py*`).
+  - **2026-08-07: these were silently dead.** The rebrand left the Startup
+    folder holding `Rencho Listener.lnk` / `Rencho Server.lnk` pointing at
+    `run_rencho_listener.vbs` and a `BRAIN\Rencho\` folder that no longer
+    existed, so nothing had auto-started since. Windows gives NO error for a
+    broken startup shortcut — it just doesn't run. Replaced with
+    `Sarah Server.lnk` / `Sarah Listener.lnk`. **If the project is ever
+    renamed or moved again, re-run SETUP.md §4** — .lnk files store absolute
+    paths and will break the same way. Same trap bit `Desktop\Rencho-GITHUB.lnk`.
 - **Icon art**: `quiet_frequency_icon.png` + `quiet-frequency-philosophy.md`
   — an original minimalist icon (rounded head/shoulders silhouette,
   glowing cyan "ear" point with radiating sound-wave arcs on a dark
@@ -217,6 +239,64 @@ capabilities:
   needs a vision model (Claude default fine; OpenAI use gpt-4o/gpt-4o-mini).
 - Header renamed to "SARAH"; right-side demo panels (Active Tasks/Status/
   Session Memory) hidden (display:none, elements kept so JS refs don't break).
+- **Claude Projects (2026-08-07)** — the constellation is the projects UI; the
+  **whole right rail is `display:none`** (Adeel asked for it hidden once the
+  orbit replaced it). All four panels there are kept in the DOM, NOT deleted,
+  because live code still writes into them: `renderProjects()` → `#projectList`,
+  `createTask()` → `#taskList`, `updateConnectionStat()` → `#connectionStat`.
+  Deleting any of them breaks JS. Un-hiding is a one-word change on `.rail-right`
+  (but Status/Session Memory have their own `display:none` — their numbers are
+  still hard-coded mock values).
+  - **Add / Import / All-projects buttons live in Settings ⚙**, moved out of the
+    hidden panel so they stay reachable. They must have exactly one instance —
+    don't re-add copies to the panel or `getElementById` will bind only the first.
+  - `renderProjects()` **re-syncs `projectsInput.value` from config on every
+    call.** Non-obvious but load-bearing: Add/Import now run from inside the open
+    Settings modal, and Save does `config.claudeProjects = projectsInput.value`,
+    so a stale textarea would silently wipe a just-completed import.
+  - **There is no Anthropic API that lists claude.ai Projects.** They're behind
+    the claude.ai web session; the avatar page (origin 127.0.0.1:8765) can't
+    read that cross-origin, and proxying it would mean storing the user's
+    claude.ai session cookie — rejected. Don't go looking for that endpoint again.
+  - List lives in `config.claudeProjects` as `Name | URL` lines (hand-editable
+    in Settings ⚙). `parseProjects` / `projectsToText` / `getProjects` /
+    `setProjects` / `renderProjects` / `findProject`.
+  - **Import** button copies a one-liner that scrapes `a[href*="/project/"]` in a
+    logged-in claude.ai tab and dedupes by URL; user pastes the result back into
+    a prompt(). It merges by URL, so re-importing is safe. Not self-syncing.
+  - Voice, all handled locally in `tryHandleAction` with no AI call: "open my X
+    project", "open project X", "open X on claude", "open my claude projects",
+    "list my projects". Placed BEFORE the generic `open <word>` site handler so a
+    project named e.g. "Drive" beats the ACTION_SITES bookmark; the generic
+    handler also tries `findProject` before falling back to guessing `X.com`.
+  - `findProject` matches exact → startsWith → substring → all-words, so speech
+    mishearings ("sara assistant" → "Sarah Assistant") still land.
+  - Project *names* are injected into `buildSystemPrompt` so the brain knows what
+    he's referring to; opening is local, the model does nothing for it.
+  - **Entries may have no URL.** `parseProjects` accepts "Name | URL", a bare
+    URL, or a bare Name. A name-only entry still gets an orbit node, a panel
+    row and a voice command — it just opens `claude.ai/projects` and says it
+    isn't linked (`speakOpenProject`). `config.claudeProjects` is seeded from
+    `DEFAULT_PROJECTS` (Adeel's 10 real project names, taken from a screenshot)
+    **only when the key is absent** — an empty string means he deleted them all
+    and must not be re-seeded on reload.
+  - Import merges **by normalized name** (`normName`) into existing unlinked
+    entries so links attach in place and keep their orbit position, and only
+    appends when there's no name match. Re-importing is idempotent.
+  - **Orbit click hit-testing**: `draw()` records `orbitHits` in SCREEN space
+    every frame (`cx + nx * hudZoom`), and `orbitHitAt()` tests against those.
+    Do NOT recompute the geometry in the click handler — the nodes rotate
+    (`constellationDrift`), wobble, and zoom (`hudZoom`), so a second
+    computation drifts out of sync with what's actually painted. Boxes are
+    scanned in reverse so the label painted on top wins an overlap.
+  - Labels truncate at `ORBIT_MAX_LABEL` (22 chars) or they overflow into the
+    side rails; the full name goes in `canvas.title` on hover. Past 10 projects
+    the nodes alternate between two radii (`node.ring`) to limit collisions.
+  - **Testing gotcha**: in the Claude Code browser pane `innerWidth` is 0 and
+    the page never composites, so `requestAnimationFrame` never fires and
+    `orbitHits` stays empty. To test, `Object.defineProperty(window,
+    'innerWidth', {value:1280})`, call `resizeAll()`, then call
+    `animate(performance.now())` once by hand to force a frame.
 
 ### GitHub sync of the Sarah project itself
 - `BRAIN\Sarah` is a git repo pushed to **github.com/AdeelSiddiqui38/Rancho**

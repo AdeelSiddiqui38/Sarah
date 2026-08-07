@@ -32,6 +32,7 @@ from pathlib import Path
 
 PORT = 8765
 BASE_DIR = Path(__file__).resolve().parent  # portable: Mac + Windows
+AVATAR_FILE = "/sarah-avatar-ui.html"
 OPENAI_PROXY_PATH = "/proxy/openai"
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 GITHUB_PROXY_PATH = "/proxy/github"
@@ -44,6 +45,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):
         pass  # quiet — runs silently in the background via pythonw
+
+    def send_head(self):
+        # Serve the avatar at the bare root, so the address bar reads
+        # "127.0.0.1:8765" instead of trailing the whole filename. Done as a
+        # rewrite rather than a redirect on purpose: a redirect would put the
+        # long path back in the address bar, which defeats the point. There is
+        # no index.html in this folder, so without this "/" would render a
+        # directory listing of the BRAIN folder instead.
+        if self.path in ("/", "/index.html"):
+            self.path = AVATAR_FILE
+        return super().send_head()
 
     def end_headers(self):
         # Serving sarah-avatar-ui.html over http:// (instead of file://)

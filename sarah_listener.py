@@ -31,7 +31,7 @@ LOG_FILE = BASE_DIR / "sarah_listener.log"
 # permission for file:// pages, so it re-prompts every time. Over
 # http://localhost it's treated as a stable, trustworthy origin and the
 # mic permission grant sticks for good.
-AVATAR_URL = "http://127.0.0.1:8765/sarah-avatar-ui.html"
+AVATAR_URL = "http://127.0.0.1:8765/"
 
 # Common ways "Sarah" gets mis-heard by speech recognizers, so the wake
 # word still triggers even if it's not transcribed perfectly.
