@@ -93,6 +93,12 @@ Read the file if you need older context than this conversation holds. Keep it \
 tidy — update a line rather than adding a near-duplicate, and drop anything \
 that turns out to be wrong.
 
+You run locally on this machine and are already authenticated. You do **not** \
+use an OpenAI or Anthropic API key — the provider and key boxes in the avatar's \
+Settings are only a fallback for when this agent is offline. Never ask Adeel \
+for an API key and never say you need one; if he asks about keys, tell him \
+plainly that you don't use one while the agent is running.
+
 You may edit freely inside those two folders. Anything outside them, anything \
 destructive, and anything that sends, posts, or books on his behalf will pause \
 for his confirmation — that is expected, not an error. Do not try to work \
@@ -160,13 +166,33 @@ def read_memory() -> str:
         return ""
 
 
+def memory_facts() -> str:
+    """Just the remembered facts — the "- " lines.
+
+    The file also carries a title and a paragraph explaining how it works. That
+    prose is for a human opening the file, not for the avatar's Settings box or
+    for merging back. Mirroring the whole file put documentation in the UI where
+    facts should be, and would have re-appended those sentences as bullets on
+    every reconnect.
+    """
+    return "\n".join(
+        ln.rstrip() for ln in read_memory().splitlines() if ln.lstrip().startswith("- ")
+    ).strip()
+
+
 def merge_browser_memory(notes: str) -> int:
     """Fold the avatar's old localStorage notes into the memory file.
 
     Runs on every connect, but only appends lines that aren't already there —
     so it migrates the existing notes once and is a no-op afterwards.
     """
-    incoming = [ln.strip().lstrip("-").strip() for ln in (notes or "").splitlines()]
+    # Only real facts travel. Headings and prose are skipped so the file's own
+    # explanatory header can never round-trip back in as bullets.
+    incoming = [
+        ln.strip().lstrip("-").strip()
+        for ln in (notes or "").splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
     incoming = [ln for ln in incoming if ln]
     if not incoming:
         return 0
@@ -348,7 +374,7 @@ class Sarah:
     # ---------- the agent loop ----------
 
     async def start(self) -> None:
-        memory = read_memory()
+        memory = memory_facts()
         persona = SARAH_PERSONA
         if memory:
             persona += f"\n\nWhat you already know about Adeel:\n{memory}\n"
@@ -394,7 +420,7 @@ class Sarah:
         change keeps the prompt cache intact for the common case.
         """
         blocks = []
-        current = read_memory()
+        current = memory_facts()
         if current and current != self.memory_sent:
             blocks.append(f"Updated memory about Adeel:\n{current}")
             self.memory_sent = current
@@ -427,7 +453,7 @@ class Sarah:
                         save_session_id(message.session_id)
                     # She may have appended to memory during the turn; mirror
                     # it back so Settings ⚙ isn't showing a stale list.
-                    current = read_memory()
+                    current = memory_facts()
                     if current != self.memory_sent:
                         self.memory_sent = current
                         await self.send({"type": "memory", "text": current})
@@ -482,7 +508,7 @@ class Sarah:
                     if names != self.projects:
                         self.projects = names
                         self.projects_sent = False
-                    await self.send({"type": "memory", "text": read_memory()})
+                    await self.send({"type": "memory", "text": memory_facts()})
                 elif kind == "interrupt":
                     if self.client:
                         await self.client.interrupt()

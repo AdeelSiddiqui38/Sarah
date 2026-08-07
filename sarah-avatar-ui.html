@@ -242,7 +242,8 @@
   <div class="modal hidden" id="settingsModal">
     <div class="modal-card" style="width:420px;text-align:left;">
       <h4 style="text-align:center;">Sarah Settings</h4>
-      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">AI Provider</label>
+      <div id="brainBanner" style="margin:0 0 14px;padding:10px 12px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;font-size:12px;line-height:1.5;"></div>
+      <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;">Fallback provider <span style="text-transform:none;letter-spacing:0;">(only used when the agent is offline)</span></label>
       <select id="providerSelect"
         style="width:100%;margin:6px 0 14px;padding:8px 10px;border-radius:8px;border:1px solid var(--panel-border);background:#0e1320;color:var(--text);font-size:13px;">
         <option value="anthropic">Claude (Anthropic)</option>
@@ -766,6 +767,7 @@ document.getElementById('rejectBtn').addEventListener('click', () => {
 const AGENT_URL = 'ws://127.0.0.1:8766';
 let agentSocket = null;
 let agentReady = false;
+let agentModel = '';
 let agentRetry = 0;
 let pendingAgentPermission = null;   // { id } while the modal is up
 let agentTurnWasVoice = false;       // whether to reopen the mic when the turn ends
@@ -791,6 +793,7 @@ function handleAgentMessage(msg) {
     case 'hello':
       agentReady = true;
       agentRetry = 0;
+      agentModel = msg.model || '';
       updateConnectionStat();
       // Hand the agent everything this page knows that it doesn't. Without
       // this, "remember that ..." and the project list stayed trapped in
@@ -1161,8 +1164,28 @@ function currentApiKey() {
   return config.provider === 'openai' ? config.openaiApiKey : config.apiKey;
 }
 
+// Says plainly which brain is answering. Without this it looked like the
+// provider dropdown was in charge, so an OpenAI key got entered for a brain
+// that never reads one — and Sarah, being the agent, kept asking for it.
+function updateBrainBanner() {
+  const el = document.getElementById('brainBanner');
+  if (!el) return;
+  if (typeof agentReady !== 'undefined' && agentReady) {
+    el.innerHTML = '<b style="color:var(--ok)">● Sarah agent is live</b> — running ' +
+      (agentModel || 'Claude') + ' locally, with your files, shell and connectors. ' +
+      '<b>No API key is used or needed</b> while this is on. The provider below is only a standby.';
+    el.style.borderColor = 'rgba(80,200,140,.4)';
+  } else {
+    el.innerHTML = '<b style="color:var(--warn)">● Agent offline</b> — falling back to the ' +
+      'provider below, which needs its API key and has no access to your files or connectors. ' +
+      'Start it with <code>run_sarah_agent.vbs</code>.';
+    el.style.borderColor = 'rgba(230,170,60,.45)';
+  }
+}
+
 function updateConnectionStat() {
   const el = document.getElementById('connectionStat');
+  updateBrainBanner();
   if (typeof agentReady !== 'undefined' && agentReady) {
     el.textContent = 'Agent connected';
     el.style.color = 'var(--ok)';
@@ -1408,6 +1431,7 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
   memoryNotesInput.value = config.memoryNotes || '';
   githubTokenInput.value = config.githubToken || '';
   projectsInput.value = config.claudeProjects || '';
+  updateBrainBanner();
   populateVoices();
   settingsModal.classList.remove('hidden');
 });
