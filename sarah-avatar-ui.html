@@ -792,7 +792,22 @@ function handleAgentMessage(msg) {
       agentReady = true;
       agentRetry = 0;
       updateConnectionStat();
+      // Hand the agent everything this page knows that it doesn't. Without
+      // this, "remember that ..." and the project list stayed trapped in
+      // localStorage and the brain never saw them.
+      agentSend({
+        type: 'context',
+        memoryNotes: config.memoryNotes || '',
+        projects: getProjects().map(p => p.name),
+      });
       toast(`Sarah agent online — ${msg.workspaces.length} workspace${msg.workspaces.length === 1 ? '' : 's'}`);
+      break;
+    case 'memory':
+      // The agent's memory file is now the source of truth; mirror it into
+      // config so Settings ⚙ shows what she actually remembers.
+      config.memoryNotes = msg.text || '';
+      saveConfig(config);
+      if (typeof memoryNotesInput !== 'undefined' && memoryNotesInput) memoryNotesInput.value = config.memoryNotes;
       break;
     case 'status':
       // The agent drives the avatar's state machine now, so the visual
@@ -832,7 +847,12 @@ function handleAgentMessage(msg) {
   }
 }
 
+let agentRetryTimer = null;
 function connectAgent() {
+  // Guard against stacking sockets: a queued retry plus a live reconnect used
+  // to leave two open at once, so every reply arrived — and was spoken — twice.
+  if (agentRetryTimer) { clearTimeout(agentRetryTimer); agentRetryTimer = null; }
+  if (agentSocket && (agentSocket.readyState === WebSocket.OPEN || agentSocket.readyState === WebSocket.CONNECTING)) return;
   try { agentSocket = new WebSocket(AGENT_URL); } catch (e) { scheduleAgentRetry(); return; }
   agentSocket.addEventListener('message', (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch (err) { return; }
@@ -850,8 +870,10 @@ function connectAgent() {
 
 function scheduleAgentRetry() {
   // Back off to ~15s so a machine without the agent running doesn't spin.
+  if (agentRetryTimer) return;                 // one retry in flight, not N
   agentRetry = Math.min(agentRetry + 1, 10);
-  setTimeout(connectAgent, Math.min(1000 * agentRetry, 15000));
+  agentRetryTimer = setTimeout(() => { agentRetryTimer = null; connectAgent(); },
+                               Math.min(1000 * agentRetry, 15000));
 }
 connectAgent();
 
@@ -1760,6 +1782,10 @@ function tryHandleAction(text) {
 
   let m = lower.match(/^remember that\s+(.+)/) || lower.match(/^remember\s+(.+)/);
   if (m) {
+    // With the agent up, memory belongs to it (sarah_memory.md) — handling it
+    // locally here is what split her memory in two. Fall through so the agent
+    // writes it, and the page picks the change back up via the 'memory' event.
+    if (agentConnected()) return null;
     const fact = m[1].trim();
     const notes = (config.memoryNotes || '').trim();
     config.memoryNotes = notes ? notes + '\n- ' + fact : '- ' + fact;

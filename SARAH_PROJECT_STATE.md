@@ -127,6 +127,38 @@ add a tool or an MCP server to the agent instead.
   Listener. Three `pythonw.exe` now — filter on CommandLine, never
   `taskkill /IM pythonw.exe`.
 - Logs to `sarah_agent.log`. Model is `claude-opus-5`.
+- **Memory bridge (2026-08-07, second pass)** — the browser used to hold memory
+  in localStorage where the agent could never see it, so "remember that..." went
+  nowhere useful and she felt like two assistants. Now `sarah_memory.md` in the
+  Sarah folder is the single source of truth: loaded into the system prompt at
+  startup, re-sent mid-turn via `_with_context()` when it changes (the system
+  prompt is fixed once the client connects, so this is the only way an in-session
+  update reaches her without a restart). The page's old notes merge in once on
+  connect (`merge_browser_memory`, dedupes, so it's a no-op after the first
+  run), and the page's Settings box now *mirrors* the file via the `memory`
+  event. `tryHandleAction`'s local "remember that" branch deliberately returns
+  null when the agent is up — handling it locally is what split memory in two.
+- **Sessions survive restarts** — `session_id` from ResultMessage is saved to
+  `.sarah_session` and passed as `resume`. A stale id falls back to a fresh
+  session instead of failing startup. Delete the file to force a blank thread.
+- **Connectors were already there.** MCP servers configured via `claude mcp add`
+  are inherited by the SDK **regardless of `setting_sources`** — no wiring
+  needed. Verified live: Gmail, Google Calendar, Google Drive, Notion, Xero,
+  Canva. `strict_mcp_config=True` would cut them off; don't set it.
+  - MCP permission split (`MCP_READ` / `MCP_NEVER_AUTO` in `_decide`): reads
+    free, anything that sends/creates/deletes/shares/books/pays always confirms
+    and never gets standing approval. Ambiguous names (`get_or_create_page`)
+    confirm — the acting-verb check runs first on purpose.
+- **Two bugs found and fixed while testing this pass**, both worth remembering:
+  1. *Attach/detach fight loop.* The agent kept one `self.ws` and closed the
+     previous client on connect; with two tabs open, each attach killed the
+     other, whose auto-reconnect killed the first — once per second, forever.
+     Now `self.clients` is a set and messages broadcast. Multiple faces are
+     supported deliberately.
+  2. *Stacked sockets → everything spoken twice.* A queued reconnect timer plus
+     a live reconnect left two WebSockets open in one page. `connectAgent()` now
+     bails if a socket is OPEN/CONNECTING and `scheduleAgentRetry()` keeps at
+     most one timer in flight.
 - **Verified working 2026-08-07**: read a real APEX file and answered correctly
   ("posts to send-booking.php"); a Desktop write correctly prompted, was
   declined, and the file was never created.

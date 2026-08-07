@@ -17,6 +17,25 @@ Personal always-on, voice-first assistant ("JARVIS-style") for Adeel.
 - **run_sarah_agent.vbs / run_sarah_server.vbs / run_sarah_listener.vbs** —
   silent background launchers. All three autostart at login.
 
+## Memory
+
+`sarah_memory.md` is the single source of truth, owned by the agent. Say
+"remember that ..." and she appends to it; it loads into her system prompt at
+startup and is re-sent mid-session when it changes, so a restart doesn't forget.
+The avatar's Settings ⚙ box mirrors the file rather than holding its own copy —
+that split was why she used to behave like two different assistants.
+
+Conversations also survive a restart: the session id is kept in `.sarah_session`
+and resumed. Delete that file to start her on a blank thread.
+
+## Connectors
+
+Sarah inherits every MCP connector configured through the `claude` CLI — no
+per-connector code. Currently live: **Gmail, Google Calendar, Google Drive,
+Notion, Xero, Canva**. Check with `claude mcp list`; add more with
+`claude mcp add`, which also handles the OAuth. Restart the agent to pick up
+changes.
+
 ## Permissions
 
 Sarah edits freely inside her **named folders** — `BRAIN\Sarah` and the APEX
@@ -24,6 +43,13 @@ repo — and asks before anything else. Two things always prompt regardless of
 location: paths outside those folders, and destructive or outward-facing shell
 commands (`rm -rf`, force push, hard reset, deploy, pipe-to-shell, shutdown).
 Reads are never gated. An unrecognised tool prompts the first time.
+
+**Connectors follow the same idea, split by looking vs acting.** Reading your
+inbox, calendar, Drive or Notion is free — an assistant that needs permission to
+look at your own calendar is useless. Anything that sends, replies, creates,
+deletes, shares, publishes, books or pays **always** confirms and never earns
+standing approval, however many times you've approved it before. Anything whose
+name doesn't clearly say which it is also confirms.
 
 The rules live in `_decide()` in `sarah_agent.py`; to add a workspace, add it to
 `WORKSPACES`. Prompts appear in the avatar and are answered by voice or click.

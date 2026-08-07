@@ -52,6 +52,16 @@ PORT = 8766
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / "sarah_agent.log"
 
+# Sarah's memory, as a plain file she can read and append to herself.
+# It lives here rather than in the browser's localStorage because the browser
+# is no longer the brain: anything only the page knows is invisible to the
+# agent. This file is the single source of truth; the page's old memoryNotes
+# are merged in once on connect and then follow this.
+MEMORY_FILE = BASE_DIR / "sarah_memory.md"
+# Last conversation id, so a restarted agent picks up where it left off
+# instead of forgetting the thread mid-task.
+SESSION_FILE = BASE_DIR / ".sarah_session"
+
 # The named folders Sarah may work in without asking. Everything else — the rest
 # of the disk, and every destructive command wherever it runs — needs a yes.
 SARAH_DIR = BASE_DIR
@@ -77,10 +87,17 @@ subfolder. Your own source lives at {sarah}.
 If he asks for design options, produce genuinely distinct directions rather \
 than variations on one idea, and describe them briefly enough to hear.
 
-You may edit freely inside those two folders. Anything outside them, and \
-anything destructive, will pause for his confirmation — that is expected, not \
-an error. Do not try to work around it.
-""".format(apex=APEX_DIR, sarah=SARAH_DIR)
+Your memory is the file {memory}. When he tells you to remember something, \
+append it there as a single "- " line, in your own words, and confirm briefly. \
+Read the file if you need older context than this conversation holds. Keep it \
+tidy — update a line rather than adding a near-duplicate, and drop anything \
+that turns out to be wrong.
+
+You may edit freely inside those two folders. Anything outside them, anything \
+destructive, and anything that sends, posts, or books on his behalf will pause \
+for his confirmation — that is expected, not an error. Do not try to work \
+around it, and never assume a confirmation was granted.
+""".format(apex=APEX_DIR, sarah=SARAH_DIR, memory=MEMORY_FILE)
 
 # Tools that only observe. Always allowed — reading is not a side effect.
 READ_ONLY_TOOLS = {
@@ -108,6 +125,23 @@ DESTRUCTIVE = re.compile(
     """
 )
 
+# --- MCP connectors (Gmail, Calendar, Drive, Notion, ... configured via
+# `claude mcp add`; the SDK inherits those from the CLI). Tool names arrive as
+# mcp__<server>__<action>.
+#
+# The split that matters: *looking* is free, because an assistant that needs
+# permission to read your own calendar is useless. *Acting on the outside
+# world* always confirms — sending mail, creating events, posting, booking,
+# paying. Those are irreversible and visible to other people, so they never get
+# standing approval no matter how many times they've been approved before.
+MCP_READ = re.compile(
+    r"(?i)(^|_)(list|get|search|read|find|fetch|view|query|show|describe|check|count|download)(_|$)"
+)
+MCP_NEVER_AUTO = re.compile(
+    r"(?i)(^|_)(send|post|reply|forward|create|add|update|edit|delete|remove|archive|"
+    r"move|share|invite|book|order|buy|pay|checkout|publish|upload|write|schedule|cancel)(_|$)"
+)
+
 
 def log(msg: str) -> None:
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}"
@@ -115,6 +149,52 @@ def log(msg: str) -> None:
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def read_memory() -> str:
+    try:
+        return MEMORY_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def merge_browser_memory(notes: str) -> int:
+    """Fold the avatar's old localStorage notes into the memory file.
+
+    Runs on every connect, but only appends lines that aren't already there —
+    so it migrates the existing notes once and is a no-op afterwards.
+    """
+    incoming = [ln.strip().lstrip("-").strip() for ln in (notes or "").splitlines()]
+    incoming = [ln for ln in incoming if ln]
+    if not incoming:
+        return 0
+    existing = read_memory()
+    have = {ln.strip().lstrip("-").strip().lower() for ln in existing.splitlines()}
+    new = [ln for ln in incoming if ln.lower() not in have]
+    if not new:
+        return 0
+    header = "" if existing else "# What Sarah remembers about Adeel\n"
+    with open(MEMORY_FILE, "a", encoding="utf-8") as f:
+        if not existing:
+            f.write(header + "\n")
+        for ln in new:
+            f.write(f"- {ln}\n")
+    return len(new)
+
+
+def load_session_id() -> str | None:
+    try:
+        sid = SESSION_FILE.read_text(encoding="utf-8").strip()
+        return sid or None
+    except OSError:
+        return None
+
+
+def save_session_id(sid: str) -> None:
+    try:
+        SESSION_FILE.write_text(sid, encoding="utf-8")
     except OSError:
         pass
 
@@ -159,20 +239,30 @@ def paths_in_command(command: str) -> list[str]:
 
 class Sarah:
     def __init__(self):
-        self.ws = None                 # the connected browser, if any
+        # Every attached face. This is a set rather than a single socket
+        # because kicking the previous client turned two open tabs into an
+        # infinite fight: each attach closed the other, whose auto-reconnect
+        # immediately closed the first. Broadcasting to all of them is both
+        # simpler and better — Sarah can be open on two screens.
+        self.clients: set = set()
         self.pending: dict[str, asyncio.Future] = {}
         self.client: ClaudeSDKClient | None = None
         self.busy = False
+        self.memory_sent = ""          # memory already in the system prompt
+        self.projects: list[str] = []  # names only; the page owns the URLs
+        self.projects_sent = False
 
     # ---------- browser plumbing ----------
 
     async def send(self, payload: dict) -> None:
-        if self.ws is None:
+        if not self.clients:
             return
-        try:
-            await self.ws.send(json.dumps(payload))
-        except websockets.exceptions.ConnectionClosed:
-            self.ws = None
+        raw = json.dumps(payload)
+        for ws in list(self.clients):
+            try:
+                await ws.send(raw)
+            except websockets.exceptions.ConnectionClosed:
+                self.clients.discard(ws)
 
     async def ask_user(self, tool: str, summary: str, detail: str) -> bool:
         """Push a confirmation to the browser and wait for the answer.
@@ -180,7 +270,7 @@ class Sarah:
         Fails closed: with no browser attached there is nobody to approve, so
         the action is denied rather than silently allowed.
         """
-        if self.ws is None:
+        if not self.clients:
             log(f"DENY (no UI attached) {tool}: {summary}")
             return False
         req_id = f"perm_{int(time.time() * 1000)}_{len(self.pending)}"
@@ -222,8 +312,21 @@ class Sarah:
                 return False, short, f"it touches {stray[0]}, outside your named folders"
             return True, short, ""
 
-        # Unknown tool (an MCP connector, say). Confirm the first time —
-        # better to ask about something harmless than to auto-run something new.
+        if tool.startswith("mcp__"):
+            parts = tool.split("__", 2)
+            service = parts[1] if len(parts) > 2 else "a connector"
+            action = parts[2] if len(parts) > 2 else tool
+            pretty = f"{action.replace('_', ' ')} ({service})"
+            # Order matters: check the acting verbs first, so a name like
+            # "get_or_create_page" confirms rather than passing as a read.
+            if MCP_NEVER_AUTO.search(action):
+                return False, pretty, "it acts on the outside world through your account"
+            if MCP_READ.search(action):
+                return True, pretty, ""
+            return False, pretty, "I can't tell whether this only reads or also changes something"
+
+        # Anything else unrecognised. Confirm — better to ask about something
+        # harmless than to auto-run a tool nobody has vouched for.
         return False, tool, "this is a tool I haven't been given standing approval for"
 
     async def can_use_tool(self, tool_name, input_data, context):
@@ -245,17 +348,62 @@ class Sarah:
     # ---------- the agent loop ----------
 
     async def start(self) -> None:
+        memory = read_memory()
+        persona = SARAH_PERSONA
+        if memory:
+            persona += f"\n\nWhat you already know about Adeel:\n{memory}\n"
+
+        resume_id = load_session_id()
         options = ClaudeAgentOptions(
             model=MODEL,
             cwd=str(SARAH_DIR),
             add_dirs=[str(p) for p in WORKSPACES if p != SARAH_DIR],
-            system_prompt={"type": "preset", "preset": "claude_code", "append": SARAH_PERSONA},
+            system_prompt={"type": "preset", "preset": "claude_code", "append": persona},
             permission_mode="default",
             can_use_tool=self.can_use_tool,
+            resume=resume_id,
         )
         self.client = ClaudeSDKClient(options=options)
-        await self.client.connect()
-        log(f"Agent connected. model={MODEL} workspaces={[str(w) for w in WORKSPACES]}")
+        try:
+            await self.client.connect()
+        except Exception:                                # noqa: BLE001
+            # A stale session id (cleared history, different machine) shouldn't
+            # brick startup — drop it and come up fresh.
+            if not resume_id:
+                raise
+            log("Could not resume the previous session; starting a fresh one.")
+            SESSION_FILE.unlink(missing_ok=True)
+            options.resume = None
+            self.client = ClaudeSDKClient(options=options)
+            await self.client.connect()
+
+        self.memory_sent = memory
+        log(
+            f"Agent connected. model={MODEL} "
+            f"workspaces={[str(w) for w in WORKSPACES]} "
+            f"memory={'yes' if memory else 'empty'} "
+            f"resumed={'yes' if resume_id else 'no'}"
+        )
+
+    def _with_context(self, text: str) -> str:
+        """Prepend memory/projects only when they've changed since last sent.
+
+        The system prompt is fixed once the client connects, so anything Sarah
+        learns mid-session (a new "remember that ...", a re-imported project
+        list) would otherwise not reach her until a restart. Sending it only on
+        change keeps the prompt cache intact for the common case.
+        """
+        blocks = []
+        current = read_memory()
+        if current and current != self.memory_sent:
+            blocks.append(f"Updated memory about Adeel:\n{current}")
+            self.memory_sent = current
+        if self.projects and not self.projects_sent:
+            blocks.append("His Claude Projects: " + ", ".join(self.projects))
+            self.projects_sent = True
+        if not blocks:
+            return text
+        return "<context>\n" + "\n\n".join(blocks) + "\n</context>\n\n" + text
 
     async def handle_utterance(self, text: str) -> None:
         if self.busy:
@@ -264,7 +412,7 @@ class Sarah:
         self.busy = True
         await self.send({"type": "status", "state": "thinking"})
         try:
-            await self.client.query(text)
+            await self.client.query(self._with_context(text))
             async for message in self.client.receive_response():
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
@@ -275,6 +423,14 @@ class Sarah:
                         elif isinstance(block, ToolUseBlock):
                             await self.send({"type": "status", "state": "acting"})
                 elif isinstance(message, ResultMessage):
+                    if message.session_id:
+                        save_session_id(message.session_id)
+                    # She may have appended to memory during the turn; mirror
+                    # it back so Settings ⚙ isn't showing a stale list.
+                    current = read_memory()
+                    if current != self.memory_sent:
+                        self.memory_sent = current
+                        await self.send({"type": "memory", "text": current})
                     await self.send({
                         "type": "done",
                         "reason": message.terminal_reason,
@@ -290,20 +446,15 @@ class Sarah:
     # ---------- websocket server ----------
 
     async def serve(self, ws) -> None:
-        if self.ws is not None:
-            # One face at a time; a stale tab shouldn't shadow the live one.
-            try:
-                await self.ws.close()
-            except Exception:                        # noqa: BLE001
-                pass
-        self.ws = ws
-        log("Browser attached.")
-        await self.send({"type": "status", "state": "idle"})
-        await self.send({
+        self.clients.add(ws)
+        log(f"Browser attached ({len(self.clients)} connected).")
+        # Greet only the new arrival; the others are already up to date.
+        await ws.send(json.dumps({"type": "status", "state": "idle"}))
+        await ws.send(json.dumps({
             "type": "hello",
             "model": MODEL,
             "workspaces": [str(w) for w in WORKSPACES],
-        })
+        }))
         try:
             async for raw in ws:
                 try:
@@ -320,6 +471,18 @@ class Sarah:
                     fut = self.pending.get(msg.get("id"))
                     if fut and not fut.done():
                         fut.set_result(bool(msg.get("allow")))
+                elif kind == "context":
+                    # The page's legacy memory + its project list. Memory is
+                    # merged into the file once; projects are name-only (the
+                    # page keeps the URLs and does the opening itself).
+                    added = merge_browser_memory(msg.get("memoryNotes") or "")
+                    if added:
+                        log(f"Merged {added} note(s) from the avatar into {MEMORY_FILE.name}")
+                    names = [n for n in (msg.get("projects") or []) if n]
+                    if names != self.projects:
+                        self.projects = names
+                        self.projects_sent = False
+                    await self.send({"type": "memory", "text": read_memory()})
                 elif kind == "interrupt":
                     if self.client:
                         await self.client.interrupt()
@@ -327,9 +490,8 @@ class Sarah:
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
-            if self.ws is ws:
-                self.ws = None
-            log("Browser detached.")
+            self.clients.discard(ws)
+            log(f"Browser detached ({len(self.clients)} left).")
 
 
 async def main() -> None:
