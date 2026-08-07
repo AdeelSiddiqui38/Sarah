@@ -3,14 +3,36 @@
 Personal always-on, voice-first assistant ("JARVIS-style") for Adeel.
 
 ## Parts
-- **sarah-avatar-ui.html** — browser avatar UI: voice in/out, in-page wake word,
-  Claude/OpenAI brain, memory, GitHub tool-calling, and the Claude Projects
-  panel. Served over `http://127.0.0.1:8765/`.
+- **sarah_agent.py** — **the brain.** Runs the Claude Agent SDK: real file
+  access, bash, git, web, and MCP connectors. Talks to the avatar over
+  `ws://127.0.0.1:8766`. This is what makes Sarah able to *do* things.
+- **sarah-avatar-ui.html** — the face: voice in/out, in-page wake word, the
+  project constellation, transcript, and approval prompts. Served over
+  `http://127.0.0.1:8765/`. Keeps a direct Claude/OpenAI brain as a fallback
+  for when the agent isn't running.
 - **sarah_server.py** — local server: serves this folder + proxies OpenAI and
-  GitHub API calls (browsers can't call those directly). Loopback-only.
+  GitHub API calls for the fallback brain. Loopback-only.
 - **sarah_listener.py** — offline Vosk wake-word listener; say "Sarah" to open
   the avatar even with no browser open.
-- **run_sarah_server.vbs / run_sarah_listener.vbs** — silent background launchers.
+- **run_sarah_agent.vbs / run_sarah_server.vbs / run_sarah_listener.vbs** —
+  silent background launchers. All three autostart at login.
+
+## Permissions
+
+Sarah edits freely inside her **named folders** — `BRAIN\Sarah` and the APEX
+repo — and asks before anything else. Two things always prompt regardless of
+location: paths outside those folders, and destructive or outward-facing shell
+commands (`rm -rf`, force push, hard reset, deploy, pipe-to-shell, shutdown).
+Reads are never gated. An unrecognised tool prompts the first time.
+
+The rules live in `_decide()` in `sarah_agent.py`; to add a workspace, add it to
+`WORKSPACES`. Prompts appear in the avatar and are answered by voice or click.
+With no browser attached the answer is **no** — it fails closed.
+
+Note the honest limit: shell commands are only heuristically inspected. A
+command that hides a path behind a variable or substitution can slip the
+location check, which is why the destructive-pattern list is separate and
+absolute.
 - **Sarah.url / *.ico** — desktop shortcut + icon.
 
 ## Run

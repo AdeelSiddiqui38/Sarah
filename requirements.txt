@@ -1,2 +1,4 @@
 vosk
 sounddevice
+claude-agent-sdk
+websockets

@@ -91,6 +91,46 @@ capabilities:
     redirects from http://127.0.0.1:8765" → never blocked again. Same
     pattern as the mic-permission fix below.
 
+## THE BRAIN MOVED (2026-08-07) — read this before touching the avatar
+
+Sarah's brain is **no longer the browser page**. It is `sarah_agent.py`, a local
+process running the **Claude Agent SDK** (`claude-agent-sdk`, installed; needs
+the `claude` CLI on PATH, which it spawns). The avatar page is now a client.
+
+**Why**: a browser page can't spawn a process, hold an OAuth refresh token, read
+a repo off disk, or run git — so every capability needed a hand-written proxy in
+`sarah_server.py` (~40 lines each: `_proxy_openai`, `_proxy_github`). That does
+not scale to "everything connected at the back end". Don't add a third proxy;
+add a tool or an MCP server to the agent instead.
+
+- **Transport**: WebSocket `ws://127.0.0.1:8766`. Browser→agent: `user`,
+  `permission_result`, `interrupt`. Agent→browser: `hello`, `status`, `text`,
+  `tool`, `permission`, `done`, `error`.
+- **Workspaces** (`WORKSPACES` in sarah_agent.py): `BRAIN\Sarah` and
+  `C:\Users\asid3\Documents\APEX\APEX_Website\APEX`. Passed as `cwd` +
+  `add_dirs`. Adding a project = adding a path here.
+- **Permission policy** — Adeel chose "free within named folders": reads always
+  allowed; writes free inside workspaces, confirmed outside; Bash confirmed if
+  it matches `DESTRUCTIVE` or mentions a path outside the workspaces; unknown
+  tools (incl. future MCP) confirmed. **Fails closed** — no browser attached
+  means denied. 17 policy cases are unit-tested, including `..` traversal out of
+  a workspace (`in_workspace` resolves before comparing).
+  - **Known limit, stated deliberately**: `paths_in_command()` is a crude regex
+    over a shell string. Variables/substitutions can hide a path. That's why the
+    destructive-pattern list is separate and location-independent.
+- **The old in-page brain is still there and still works** — `sendToBrain()`
+  routes to the agent only when the socket is up, else falls back to direct
+  Claude/OpenAI. Don't delete it; it's what keeps the avatar alive when the
+  agent is down. Attachments still take the fallback path (the agent reads files
+  by path, image paste isn't wired to it yet).
+- **Autostart**: `Sarah Agent.lnk` in `shell:startup`, alongside Server and
+  Listener. Three `pythonw.exe` now — filter on CommandLine, never
+  `taskkill /IM pythonw.exe`.
+- Logs to `sarah_agent.log`. Model is `claude-opus-5`.
+- **Verified working 2026-08-07**: read a real APEX file and answered correctly
+  ("posts to send-booking.php"); a Desktop write correctly prompted, was
+  declined, and the file was never created.
+
 ## BRAIN\Sarah\ — background services
 
 - **`sarah_server.py`** — local Python HTTP server on

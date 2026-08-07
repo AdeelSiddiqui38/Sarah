@@ -740,6 +740,7 @@ document.querySelectorAll('.chip[data-action]').forEach(btn => {
 
 document.getElementById('approveBtn').addEventListener('click', () => {
   approvalModal.classList.add('hidden');
+  if (pendingAgentPermission) { resolveAgentPermission(true); return; }
   addMsg('user', `Approved: ${pendingAction}`);
   setState('acting');
   createTask(pendingAction, { risky: true });
@@ -747,11 +748,112 @@ document.getElementById('approveBtn').addEventListener('click', () => {
 });
 document.getElementById('rejectBtn').addEventListener('click', () => {
   approvalModal.classList.add('hidden');
+  if (pendingAgentPermission) { resolveAgentPermission(false); return; }
   addMsg('assistant', `Cancelled: ${pendingAction}`);
   toast('Action cancelled', true);
   setState('idle');
   pendingAction = null;
 });
+
+/* ============ Agent backend (sarah_agent.py) ============
+   Sarah's brain moved out of this page and into a local process running the
+   Claude Agent SDK, which can actually read files, run git and call MCP
+   connectors — none of which a browser page can do. This page is now the face:
+   it ships utterances over a WebSocket and renders what comes back.
+
+   The in-page Claude/OpenAI brain below is kept as a fallback for when the
+   agent isn't running, so the avatar still answers instead of going dead. */
+const AGENT_URL = 'ws://127.0.0.1:8766';
+let agentSocket = null;
+let agentReady = false;
+let agentRetry = 0;
+let pendingAgentPermission = null;   // { id } while the modal is up
+let agentTurnWasVoice = false;       // whether to reopen the mic when the turn ends
+
+function agentConnected() { return agentReady && agentSocket && agentSocket.readyState === WebSocket.OPEN; }
+
+function resolveAgentPermission(allow) {
+  if (!pendingAgentPermission) return;
+  const { id, summary } = pendingAgentPermission;
+  pendingAgentPermission = null;
+  agentSend({ type: 'permission_result', id, allow });
+  addMsg('user', allow ? `Approved: ${summary}` : `Declined: ${summary}`);
+  setState(allow ? 'acting' : 'idle');
+  if (!allow) toast('Declined', true);
+}
+
+function agentSend(payload) {
+  if (agentConnected()) agentSocket.send(JSON.stringify(payload));
+}
+
+function handleAgentMessage(msg) {
+  switch (msg.type) {
+    case 'hello':
+      agentReady = true;
+      agentRetry = 0;
+      updateConnectionStat();
+      toast(`Sarah agent online — ${msg.workspaces.length} workspace${msg.workspaces.length === 1 ? '' : 's'}`);
+      break;
+    case 'status':
+      // The agent drives the avatar's state machine now, so the visual
+      // reflects real work (a tool running) rather than a guess.
+      setState(msg.state === 'acting' ? 'acting' : msg.state === 'thinking' ? 'thinking' : 'idle');
+      break;
+    case 'text':
+      pushMessage('assistant', msg.text);
+      addMsg('assistant', msg.text);
+      setState('speaking');
+      // Each block is spoken as it lands; the mic only reopens once the whole
+      // turn is done, so a multi-step task doesn't interrupt itself.
+      speak(msg.text, { continueConversation: false });
+      break;
+    case 'tool':
+      addMsg('assistant', `· ${msg.summary}`);
+      break;
+    case 'permission': {
+      pendingAgentPermission = { id: msg.id, summary: msg.summary };
+      approvalText.textContent = `Sarah wants to run: ${msg.summary}\n\nThis needs your OK because ${msg.detail}.`;
+      approvalText.style.whiteSpace = 'pre-line';
+      approvalModal.classList.remove('hidden');
+      setState('warning');
+      speak(`Can I ${msg.summary}? ${msg.detail}.`, { continueConversation: false });
+      break;
+    }
+    case 'done':
+      setState('idle');
+      if (agentTurnWasVoice) resumeConversationListening();
+      agentTurnWasVoice = false;
+      break;
+    case 'error':
+      toast('Agent error: ' + msg.message, true);
+      addMsg('assistant', 'Something went wrong on my end — check the agent log.');
+      setState('idle');
+      break;
+  }
+}
+
+function connectAgent() {
+  try { agentSocket = new WebSocket(AGENT_URL); } catch (e) { scheduleAgentRetry(); return; }
+  agentSocket.addEventListener('message', (e) => {
+    let msg; try { msg = JSON.parse(e.data); } catch (err) { return; }
+    handleAgentMessage(msg);
+  });
+  agentSocket.addEventListener('close', () => {
+    const wasReady = agentReady;
+    agentReady = false;
+    updateConnectionStat();
+    if (wasReady) toast('Sarah agent disconnected — falling back to the in-page brain', true);
+    scheduleAgentRetry();
+  });
+  agentSocket.addEventListener('error', () => { /* close fires next; retry there */ });
+}
+
+function scheduleAgentRetry() {
+  // Back off to ~15s so a machine without the agent running doesn't spin.
+  agentRetry = Math.min(agentRetry + 1, 10);
+  setTimeout(connectAgent, Math.min(1000 * agentRetry, 15000));
+}
+connectAgent();
 
 /* ============ Composer: type / paste / attach to talk to Sarah ============ */
 let pendingAttachments = []; // transient — never persisted (base64 stays out of localStorage)
@@ -1039,6 +1141,11 @@ function currentApiKey() {
 
 function updateConnectionStat() {
   const el = document.getElementById('connectionStat');
+  if (typeof agentReady !== 'undefined' && agentReady) {
+    el.textContent = 'Agent connected';
+    el.style.color = 'var(--ok)';
+    return;
+  }
   if (currentApiKey()) {
     el.textContent = (config.provider === 'openai' ? 'ChatGPT' : 'Claude') + ' connected';
     el.style.color = 'var(--ok)';
@@ -1428,6 +1535,16 @@ async function callOpenAI(apiKey, { tools, attachments } = {}) {
 
 async function sendToBrain(userText, attachments = [], opts = {}) {
   pushMessage('user', userText);
+
+  // Agent backend wins whenever it's up — it's the only path with real tools.
+  // Attachments still go to the in-page brain: the agent reads files off disk
+  // by path, so pasting a screenshot at it isn't wired yet.
+  if (agentConnected() && !attachments.length) {
+    agentTurnWasVoice = !opts.viaText;
+    setState('thinking');
+    agentSend({ type: 'user', text: userText });
+    return;
+  }
 
   const provider = config.provider === 'openai' ? 'openai' : 'anthropic';
   const apiKey = provider === 'openai' ? config.openaiApiKey : config.apiKey;
@@ -1826,6 +1943,10 @@ muteBtn.addEventListener('click', () => {
 document.getElementById('interruptBtn').addEventListener('click', () => {
   if (listening) stopListening();
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  // Stop the agent mid-task too, not just the speech — otherwise it keeps
+  // working (and keeps spending) after you've told it to stop.
+  if (agentConnected()) agentSend({ type: 'interrupt' });
+  agentTurnWasVoice = false;
   setState('idle');
   toast('Interrupted', true);
 });
