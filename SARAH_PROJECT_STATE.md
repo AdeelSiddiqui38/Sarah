@@ -91,6 +91,77 @@ capabilities:
     redirects from http://127.0.0.1:8765" → never blocked again. Same
     pattern as the mic-permission fix below.
 
+## Team of subagents (2026-08-07, third pass)
+
+Adeel asked to integrate a GitHub repo (TencentCloud/TencentDB-Agent-Memory,
+`feat/server_team` branch) for "team agent structure" + token optimization.
+**Evaluated it, didn't adopt it — deliberately, not by oversight.** It's a
+standalone memory-hub microservice suite: Node.js, Docker, its own database,
+vector search, a proxy, a web UI on :8125, its own LLM API key. It's built for
+an org sharing memory across multiple people's agents; token optimization
+isn't even claimed directly, just "retrieve less by retrieving right." Wrong
+shape for a single-user always-on assistant, and a lot of new attack surface
+to stand up on a machine that already holds real credentials.
+
+What Adeel actually described — "the appropriate agent works, others rest
+silent" — is a **native, already-installed** feature: `claude-agent-sdk`
+subagents (`AgentDefinition` + `agents=` on `ClaudeAgentOptions`). No new
+service, no new dependency. Implemented as `TEAM` in sarah_agent.py:
+
+- **`researcher`** — Read/Grep/Glob/WebSearch/WebFetch, model `sonnet`. Lookups,
+  documentation, exploring unfamiliar code. No write/execute tools at all.
+- **`coder`** — Read/Edit/Write/Bash/Glob/Grep, model `opus`. File and code
+  work in the two workspaces.
+- **`connector`** — Read/Grep/Glob + `mcpServers=CONNECTOR_SERVERS`, model
+  `opus`, `disallowedTools=[Bash, Write, Edit, NotebookEdit, MultiEdit]`
+  explicitly removed. Gmail/Calendar/Drive/Notion/Xero/Canva work.
+  - **Bug I introduced and caught before shipping**: first draft left `tools`
+    unset on this one, which per the SDK docs means "inherit everything" —
+    so it also had Bash/Write/Edit despite existing purely to read and
+    report. Fixed with `disallowedTools`. Caught by re-reading my own design
+    reasoning against what I'd actually written, not by an external review —
+    worth remembering that pattern.
+- **Delegation visibility**: `_decide()` special-cases `tool in ("Agent",
+  "Task")` — SDK renamed the tool at Code v2.1.63, current installed
+  claude-agent-sdk (0.2.132) emits "Agent"; "Task" kept for back-compat, both
+  tested. Delegation is always free (never confirms — nothing to protect by
+  gating the handoff itself), but gets a real summary (`"→ coder agent: ..."`)
+  instead of the usual silent `""`, so the team is visible in the transcript:
+  who picked up the task, and by omission, who didn't.
+- **`CONNECTOR_SERVERS`**: the account-managed MCP connectors (Gmail,
+  Calendar, Drive, Notion, Xero, Canva) are NOT in any local config file —
+  fetched from claude.ai at session auth. Their registered names carry a
+  literal `"claude.ai "` prefix and spaces (confirmed via
+  `claude mcp get "claude.ai Gmail"`), not the bare service name. Get this
+  wrong and `mcpServers` silently references nothing.
+
+### The test that actually mattered: does delegation bypass the permission gate?
+
+`can_use_tool` is one callback registered once per session — same code path
+regardless of whether the main thread or a subagent issues the tool call, per
+the SDK docs (subagent messages carry `parent_tool_use_id` but flow through
+the same session). **Verified live, not just inferred from docs**, because
+this is the one place a design mistake would be a real security regression:
+
+1. First attempt — told the coder subagent to write outside the workspace —
+   the subagent talked itself out of trying (no `ASK` line logged, no tool
+   call fired). That's the model being well-aligned to its prompt's
+   confirmation reminder, not proof of the code-level gate.
+2. Loaded the prompt with meta-instructions to force it ("just call the tool,
+   don't reason about the outcome") — it refused *harder*, correctly reasoning
+   that a relayed instruction isn't a verifiable confirmation from Adeel. Also
+   not what I was testing for, but a good sign about the model.
+3. Plain, unloaded request ("create this file") — the subagent attempted
+   `Write` naturally as part of doing the task. **This time**: real `ASK
+   Write` line in the log, real modal in the browser tied to a real pending
+   permission id, declined it, file was never created.
+
+**Lesson for future-Claude**: if you need to prove a security boundary holds
+under a new code path, don't ask the model to try to trigger it — a
+well-aligned model will often reason its way out of an attempt before the
+code path is ever exercised, which looks like success but proves nothing.
+Ask for the underlying task plainly and let the tool call happen naturally.
+
 ## THE BRAIN MOVED (2026-08-07) — read this before touching the avatar
 
 Sarah's brain is **no longer the browser page**. It is `sarah_agent.py`, a local

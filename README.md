@@ -28,6 +28,31 @@ that split was why she used to behave like two different assistants.
 Conversations also survive a restart: the session id is kept in `.sarah_session`
 and resumed. Delete that file to start her on a blank thread.
 
+## Team of specialists
+
+Sarah can delegate to three subagents — `researcher`, `coder`, `connector` —
+using the Claude Agent SDK's native subagent support (`agents=` on
+`ClaudeAgentOptions`, defined in `TEAM` in sarah_agent.py). Claude decides
+whether a task warrants delegating based on each one's `description`; anyone
+not delegated to costs nothing and does nothing. When she does delegate, you
+see it — a "→ coder agent: ..." line in the transcript — so which specialist
+picked up the work (and that the other two stayed silent) is visible rather
+than happening invisibly inside the model.
+
+Each specialist is scoped to what it actually needs: `researcher` gets read
+and web tools only, `coder` gets file/bash/git, `connector` gets your MCP
+connectors plus reads, with `Bash`/`Write`/`Edit` explicitly removed. Model
+choice is per-agent — `researcher` runs on Sonnet since lookups are usually
+less demanding, `coder` and `connector` stay on Opus since their mistakes cost
+more.
+
+**This does not create a second permission system.** `can_use_tool` is
+registered once on the whole session, so it gates a subagent's tool calls
+exactly like it gates Sarah's own — verified live by having the coder
+specialist attempt a write to the Desktop, watching the real confirmation
+prompt fire, declining it, and confirming the file was never created.
+Delegation cannot be used to route around what you've approved.
+
 ## Connectors
 
 Sarah inherits every MCP connector configured through the `claude` CLI — no

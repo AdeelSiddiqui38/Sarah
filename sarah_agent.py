@@ -37,6 +37,7 @@ from pathlib import Path
 
 import websockets
 from claude_agent_sdk import (
+    AgentDefinition,
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
@@ -103,7 +104,106 @@ You may edit freely inside those two folders. Anything outside them, anything \
 destructive, and anything that sends, posts, or books on his behalf will pause \
 for his confirmation — that is expected, not an error. Do not try to work \
 around it, and never assume a confirmation was granted.
+
+You have a small team of specialists you can delegate to — a researcher, a \
+coder, and a connector specialist (see their own descriptions). Delegate when \
+a task is squarely one of theirs, especially anything that would mean reading \
+several files or messages that don't need to clutter this conversation. \
+Handle short, simple requests yourself rather than delegating out of habit.
 """.format(apex=APEX_DIR, sarah=SARAH_DIR, memory=MEMORY_FILE)
+
+# claude.ai's account-managed connectors carry this literal prefix and spaces
+# in their registered name (confirmed via `claude mcp get "claude.ai Gmail"`);
+# they are not in any local config file, fetched at session auth instead. Kept
+# as a constant so a renamed/added connector is a one-line change.
+CONNECTOR_SERVERS = [
+    "claude.ai Gmail", "claude.ai Google Calendar", "claude.ai Google Drive",
+    "claude.ai Notion", "claude.ai Xero", "claude.ai Canva",
+]
+
+# The team. Kept to three, each covering a genuinely distinct part of what
+# Sarah actually does — not padded out to look more "team"-like. The real
+# payoff isn't the count, it's that an agent nobody delegates to costs nothing
+# and says nothing: Claude picks by description, and everything else stays
+# silent by default.
+#
+# Every specialist gets the same reminder about confirmation. can_use_tool is
+# registered once on the session (see start()), and it fires for a tool call
+# regardless of whether the main thread or a subagent issued it — verified
+# live (README/SARAH_PROJECT_STATE.md, 2026-08-07) by having the coder agent
+# attempt a write outside the workspace and confirming the same prompt fired
+# and a decline blocked it. The reminder in each prompt is belt-and-suspenders
+# for the model's behavior, not what actually enforces the boundary.
+_CONFIRM_REMINDER = (
+    "The same confirmation rules apply to you as to Sarah herself, and there is "
+    "no way around them — anything outside the two named folders, anything "
+    "destructive, and anything that acts on the outside world through a "
+    "connector will pause for Adeel's yes exactly as it would if he'd asked "
+    "Sarah directly. Don't try to route around that, and don't assume a "
+    "confirmation was granted."
+)
+
+TEAM = {
+    "researcher": AgentDefinition(
+        description=(
+            "Looks things up without changing anything: web search, reading "
+            "documentation, exploring an unfamiliar part of a codebase, "
+            "answering 'what does X say' or 'find out about Y'. Use for "
+            "information-gathering, not for anything that should write a "
+            "file or run a command."
+        ),
+        prompt=(
+            "You are Sarah's research specialist. Find the answer, check it "
+            "against a real source, and report back in a sentence or two — "
+            "not a transcript of your search. You have no write or execute "
+            "tools; if the task turns out to need a change, say so and stop "
+            "rather than trying to make it happen anyway."
+        ),
+        tools=["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
+        model="sonnet",
+    ),
+    "coder": AgentDefinition(
+        description=(
+            "Makes file and code changes: editing, multi-file work, running "
+            "builds or tests, git. Use for anything that writes to disk or "
+            "runs a shell command, especially work that would touch several "
+            "files and shouldn't fill up the main conversation with every "
+            "intermediate read."
+        ),
+        prompt=(
+            f"You are Sarah's coding specialist, working inside {SARAH_DIR} "
+            f"and {APEX_DIR}. Make the change, verify it — run it, check the "
+            f"diff — and report what you actually did in a sentence or two. "
+            f"{_CONFIRM_REMINDER}"
+        ),
+        tools=["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+        model="opus",
+    ),
+    "connector": AgentDefinition(
+        description=(
+            "Works with Gmail, Google Calendar, Google Drive, Notion, Xero, "
+            "or Canva — checking the inbox, looking at the calendar, "
+            "searching Drive or Notion, pulling invoices. Use when a task "
+            "means reading several messages, events, or pages whose full "
+            "content doesn't need to reach the main conversation, not for a "
+            "single quick lookup."
+        ),
+        prompt=(
+            "You are Sarah's connector specialist. Read what's asked and "
+            f"report back a short summary — not raw message bodies or full "
+            f"event dumps. {_CONFIRM_REMINDER}"
+        ),
+        # Left off `tools` entirely at first, which meant this agent also
+        # inherited Bash/Write/Edit despite existing to read connectors and
+        # report back — the opposite of the least-privilege point of scoping
+        # it. disallowedTools trims those explicitly since `tools` doesn't
+        # document accepting an `mcp__*` wildcard to grant the connector
+        # servers back if listed there instead.
+        disallowedTools=["Bash", "Write", "Edit", "NotebookEdit", "MultiEdit"],
+        mcpServers=CONNECTOR_SERVERS,
+        model="opus",
+    ),
+}
 
 # Tools that only observe. Always allowed — reading is not a side effect.
 READ_ONLY_TOOLS = {
@@ -318,6 +418,18 @@ class Sarah:
 
     def _decide(self, tool: str, data: dict) -> tuple[bool, str, str]:
         """(allowed_outright, summary, reason) — reason explains a confirm."""
+        if tool in ("Agent", "Task"):
+            # Delegation itself is never gated — the actions the specialist
+            # takes still go through this same method (can_use_tool is one
+            # session-level callback, not one per subagent), so there is
+            # nothing to protect by confirming the handoff. Giving it a
+            # summary instead of the usual silent "" is what makes the team
+            # visible: you see who picked up the task, and everyone Claude
+            # didn't delegate to is silent by simply never appearing here.
+            which = data.get("subagent_type") or "a specialist"
+            desc = (data.get("description") or "").strip()
+            return True, f"→ {which} agent" + (f": {desc}" if desc else ""), ""
+
         if tool in READ_ONLY_TOOLS:
             return True, "", ""
 
@@ -388,6 +500,7 @@ class Sarah:
             permission_mode="default",
             can_use_tool=self.can_use_tool,
             resume=resume_id,
+            agents=TEAM,
         )
         self.client = ClaudeSDKClient(options=options)
         try:
