@@ -59,6 +59,13 @@ LOG_FILE = BASE_DIR / "sarah_agent.log"
 # agent. This file is the single source of truth; the page's old memoryNotes
 # are merged in once on connect and then follow this.
 MEMORY_FILE = BASE_DIR / "sarah_memory.md"
+# Things her unattended check-ins found that need Adeel's yes. A plain file
+# rather than an in-memory queue on purpose: self.pending (below) only lives as
+# long as a live browser connection to answer it, and an unattended run has no
+# one there to ask. So unattended mode never even attempts the action — it
+# drafts a line here instead, and the actual send/create/book/pay happens
+# later, live, the normal way, once Adeel says go.
+PENDING_FILE = BASE_DIR / "sarah_pending.md"
 # Last conversation id, so a restarted agent picks up where it left off
 # instead of forgetting the thread mid-task.
 SESSION_FILE = BASE_DIR / ".sarah_session"
@@ -70,6 +77,13 @@ APEX_DIR = Path(r"C:\Users\asid3\Documents\APEX\APEX_Website\APEX")
 WORKSPACES = [p for p in (SARAH_DIR, APEX_DIR) if p.exists()]
 
 MODEL = "claude-opus-5"
+
+# Unattended check-ins: how often Sarah looks at her connectors on her own,
+# and the local-time window she's allowed to do it in (skip the middle of the
+# night — nothing there is that urgent, and it's a real API cost for no
+# reason). Tune freely; there's nothing else that depends on these numbers.
+UNATTENDED_INTERVAL_HOURS = 4
+UNATTENDED_WINDOW = (7, 22)
 
 SARAH_PERSONA = """\
 You are Sarah, Adeel's personal assistant. You are speaking to him — most of \
@@ -94,6 +108,19 @@ Read the file if you need older context than this conversation holds. Keep it \
 tidy — update a line rather than adding a near-duplicate, and drop anything \
 that turns out to be wrong.
 
+Every few hours while he's away, you check in on your own — a message will \
+arrive that says plainly it's your own unattended check-in, not something he \
+typed. Delegate that to your connector specialist to skim his connectors for \
+anything time-sensitive or that needs a decision from him. Reading is always \
+free; sending, replying, creating, deleting, sharing, booking, or paying is \
+never something you attempt while unattended — there's no one there to say \
+yes, so instead you write one short dated line to {pending} describing what \
+you found and what you'd do about it, and stop. Say nothing if there's \
+nothing worth flagging. When he's back and asks what's pending, what came up, \
+or anything like that, read {pending} and walk him through it briefly in your \
+own words. Once he approves something there, go do it for real, then update \
+or remove that line so the file reflects what's actually still open.
+
 You run locally on this machine and are already authenticated. You do **not** \
 use an OpenAI or Anthropic API key — the provider and key boxes in the avatar's \
 Settings are only a fallback for when this agent is offline. Never ask Adeel \
@@ -110,7 +137,26 @@ coder, and a connector specialist (see their own descriptions). Delegate when \
 a task is squarely one of theirs, especially anything that would mean reading \
 several files or messages that don't need to clutter this conversation. \
 Handle short, simple requests yourself rather than delegating out of habit.
-""".format(apex=APEX_DIR, sarah=SARAH_DIR, memory=MEMORY_FILE)
+""".format(apex=APEX_DIR, sarah=SARAH_DIR, memory=MEMORY_FILE, pending=PENDING_FILE)
+
+# The unattended check-in's own instruction. Deliberately explicit that Adeel
+# is not there to answer anything — a plain "check my email" would otherwise
+# read the same whether he just asked live or this fired on a timer, and only
+# one of those has anyone around to approve a real action.
+UNATTENDED_PROMPT = (
+    "This is your own unattended check-in on a timer, not something Adeel "
+    "typed - he is not here right now. Delegate to your connector specialist "
+    "to skim Gmail, Google Calendar, Google Drive, Notion, Xero, and Canva "
+    "(and Slack, Linear, or Figma too, once connected) for anything "
+    "time-sensitive or that looks like it needs a decision from him. Reading "
+    "is free. Do not attempt to send, reply, create, delete, share, book, or "
+    "pay anything right now - it would just be denied with no one here to "
+    "approve it, which wastes a turn for nothing. Instead, for each thing "
+    "worth his attention, append one short line to "
+    f"{PENDING_FILE} - a date, what it is, what you'd do about it. If there "
+    "is genuinely nothing worth flagging, don't write anything and don't say "
+    "anything either."
+)
 
 # claude.ai's account-managed connectors carry this literal prefix and spaces
 # in their registered name (confirmed via `claude mcp get "claude.ai Gmail"`);
@@ -120,6 +166,14 @@ CONNECTOR_SERVERS = [
     "claude.ai Gmail", "claude.ai Google Calendar", "claude.ai Google Drive",
     "claude.ai Notion", "claude.ai Xero", "claude.ai Canva",
 ]
+# Not connected yet, as of 2026-08-08 (`claude mcp list` doesn't show them):
+# Slack, Linear, Figma. Adeel has to authorize each one himself in an
+# interactive session — claude.ai → Settings → Connectors (or `/mcp` in an
+# interactive `claude` terminal session) — no non-interactive process can
+# complete that OAuth handshake. Once `claude mcp list` shows one as
+# "claude.ai <Name>: ... Connected", confirm its exact registered name with
+# `claude mcp get "claude.ai <Name>"` (the space-and-prefix gotcha above bit
+# this once already) and add it to CONNECTOR_SERVERS, then restart the agent.
 
 # The team. Kept to three, each covering a genuinely distinct part of what
 # Sarah actually does — not padded out to look more "team"-like. The real
@@ -308,6 +362,17 @@ def merge_browser_memory(notes: str) -> int:
         for ln in new:
             f.write(f"- {ln}\n")
     return len(new)
+
+
+def pending_items() -> str:
+    """Just the '- ' lines from the pending-approvals file, same shape as memory_facts()."""
+    try:
+        text = PENDING_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return "\n".join(
+        ln.rstrip() for ln in text.splitlines() if ln.lstrip().startswith("- ")
+    ).strip()
 
 
 def load_session_id() -> str | None:
@@ -582,6 +647,30 @@ class Sarah:
             self.busy = False
             await self.send({"type": "status", "state": "idle"})
 
+    # ---------- unattended check-ins ----------
+
+    async def unattended_check(self) -> None:
+        """Run one connector check-in without Adeel prompting it.
+
+        Reuses handle_utterance rather than a separate code path — same busy
+        guard, same context injection, same session — so this looks to the
+        model exactly like a real turn except for what UNATTENDED_PROMPT tells
+        it. If no browser is attached (the common case, since this fires on a
+        timer), handle_utterance's sends are no-ops and this just runs quietly
+        and appends to PENDING_FILE via the tools Sarah already has.
+        """
+        if self.busy:
+            log("Unattended check skipped: already busy with something else.")
+            return
+        hour = time.localtime().tm_hour
+        if not (UNATTENDED_WINDOW[0] <= hour < UNATTENDED_WINDOW[1]):
+            return
+        before = len(pending_items().splitlines())
+        log("Unattended check-in starting.")
+        await self.handle_utterance(UNATTENDED_PROMPT)
+        added = len(pending_items().splitlines()) - before
+        log(f"Unattended check-in done, {added} new pending item(s).")
+
     # ---------- websocket server ----------
 
     async def serve(self, ws) -> None:
@@ -594,6 +683,17 @@ class Sarah:
             "model": MODEL,
             "workspaces": [str(w) for w in WORKSPACES],
         }))
+        items = pending_items()
+        if items:
+            n = len(items.splitlines())
+            await ws.send(json.dumps({
+                "type": "text",
+                "text": (
+                    f"While you were away I found {n} "
+                    f"{'thing' if n == 1 else 'things'} that might need your "
+                    "OK. Say \"what's pending\" and I'll walk you through them."
+                ),
+            }))
         try:
             async for raw in ws:
                 try:
@@ -633,6 +733,19 @@ class Sarah:
             log(f"Browser detached ({len(self.clients)} left).")
 
 
+async def unattended_loop(sarah: "Sarah") -> None:
+    # Wait out the first stretch after boot rather than firing immediately —
+    # gives the process a moment to settle, and avoids checking again right
+    # after Adeel's own first session of the day.
+    await asyncio.sleep(5 * 60)
+    while True:
+        try:
+            await sarah.unattended_check()
+        except Exception as e:                        # noqa: BLE001
+            log(f"Unattended check failed: {e!r}")
+        await asyncio.sleep(UNATTENDED_INTERVAL_HOURS * 3600)
+
+
 async def main() -> None:
     missing = [str(p) for p in (SARAH_DIR, APEX_DIR) if not p.exists()]
     if missing:
@@ -645,6 +758,8 @@ async def main() -> None:
         log(f"FATAL: could not start agent: {e!r}")
         log("Is the `claude` CLI installed and authenticated? Try `claude` in a terminal.")
         sys.exit(1)
+
+    asyncio.create_task(unattended_loop(sarah))
 
     async with websockets.serve(sarah.serve, "127.0.0.1", PORT):
         log(f"Sarah agent listening on ws://127.0.0.1:{PORT}")

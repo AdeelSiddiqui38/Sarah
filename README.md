@@ -57,9 +57,34 @@ Delegation cannot be used to route around what you've approved.
 
 Sarah inherits every MCP connector configured through the `claude` CLI — no
 per-connector code. Currently live: **Gmail, Google Calendar, Google Drive,
-Notion, Xero, Canva**. Check with `claude mcp list`; add more with
-`claude mcp add`, which also handles the OAuth. Restart the agent to pick up
-changes.
+Notion, Xero, Canva**. Check with `claude mcp list`; add more via claude.ai →
+Settings → Connectors (that's how the six live ones were added — OAuth needs
+an interactive session, `claude mcp add` alone won't do it for these). Once
+one shows as connected, confirm its exact registered name with
+`claude mcp get "claude.ai <Name>"` — see the gotcha in
+SARAH_PROJECT_STATE.md — and add it to `CONNECTOR_SERVERS` in
+`sarah_agent.py`. Restart the agent to pick up changes. **Slack, Linear, and
+Figma are not connected yet** — same process, still pending.
+
+## Unattended check-ins
+
+Sarah doesn't only act when spoken to. Every few hours (`UNATTENDED_INTERVAL_HOURS`
+in `sarah_agent.py`, only during `UNATTENDED_WINDOW` local hours) she runs a
+check-in on her own: delegates to the `connector` specialist to skim Gmail,
+Calendar, Drive, Notion, Xero, and Canva for anything time-sensitive, and
+drafts a line in **`sarah_pending.md`** for anything that looks like it needs
+a decision from Adeel — she never sends/creates/books/pays during one of
+these, only reads and drafts. Next time a browser attaches, she says how many
+things are waiting; ask "what's pending" and she reads the file and walks you
+through it. Approve one and she carries it out for real, live, the same way
+any other action would confirm.
+
+This reuses the existing permission system rather than adding a new one:
+`can_use_tool` still fails closed with no browser attached, so even if the
+model ever tried to act during a check-in anyway, it would be denied exactly
+like any other unattended attempt — the "never act while unattended"
+instruction in `UNATTENDED_PROMPT` is belt-and-suspenders, not what actually
+enforces it.
 
 ## Permissions
 

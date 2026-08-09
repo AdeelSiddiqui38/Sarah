@@ -162,6 +162,58 @@ well-aligned model will often reason its way out of an attempt before the
 code path is ever exercised, which looks like success but proves nothing.
 Ask for the underlying task plainly and let the tool call happen naturally.
 
+## Unattended check-ins (2026-08-09) — connectors with their own initiative
+
+Adeel asked for the connectors to "act automatically and have their own
+brain, jump in when needed" rather than only responding when spoken to.
+Clarified first (this was ambiguous enough to matter): he meant unattended
+background checks, not just faster in-conversation delegation — and for
+anything that would normally require his confirmation (send, book, pay), it
+should be **queued, never auto-sent**, across all six live connectors plus
+Slack/Linear/Figma once those are authorized.
+
+Built as an internal asyncio loop in `sarah_agent.py`, not a new service or
+Windows Task Scheduler entry — the agent process is already always-on
+(autostart, see below), so a timer inside it is the whole mechanism:
+
+- `unattended_loop()` fires `Sarah.unattended_check()` every
+  `UNATTENDED_INTERVAL_HOURS` (default 4), only inside `UNATTENDED_WINDOW`
+  (7am–10pm local) so nothing runs (and costs tokens) overnight for no
+  reason. Skips if she's already mid-turn with Adeel (`self.busy`).
+- It's just `handle_utterance(UNATTENDED_PROMPT)` — the exact same code path
+  as a real turn, not a parallel one — so it gets the same context
+  injection, same session, same delegation to the `connector` specialist.
+  `UNATTENDED_PROMPT` tells her plainly this is her own timer firing, not
+  Adeel, and to only read + draft, never act.
+- **Why drafting to a file beats trying to queue the actual tool call**: an
+  approved-later replay would mean holding a pending permission decision
+  across process restarts and somehow re-invoking the exact same tool call
+  afterward — real complexity for something the SDK isn't shaped for. Simpler
+  and just as safe: unattended mode never attempts the mutating call at all.
+  She writes what she'd do to `sarah_pending.md` in prose; when Adeel
+  approves it later, she does the real thing live, the normal way, with a
+  normal confirmation in front of it.
+- **This does not add a second permission system.** Even if the model ever
+  ignored the prompt and tried to act anyway, `can_use_tool` still fails
+  closed with no browser attached (existing behavior, unchanged) — the
+  "don't try" instruction saves a wasted turn, it isn't the actual boundary.
+- `sarah_pending.md` mirrors `sarah_memory.md`'s shape (`pending_items()`
+  reads its "- " lines, same pattern as `memory_facts()`). On a fresh browser
+  attach, if the file has entries, she sends one proactive line ("N things
+  might need your OK") before Adeel says anything — the one place this
+  feature is visible without asking for it.
+- **Connector scope**: all six already-live connectors (Gmail, Calendar,
+  Drive, Notion, Xero, Canva) plus Slack/Linear/Figma once those exist.
+  Confirmed via `claude mcp list` on this machine (2026-08-08) that Slack/
+  Linear/Figma are **not yet connected** — they need Adeel to authorize each
+  one himself at claude.ai → Settings → Connectors (interactive OAuth, can't
+  be done from an unattended process or this session). `CONNECTOR_SERVERS`
+  has a comment with the exact next step once he does; nothing else in the
+  unattended-check code needs to change when they're added.
+- Not yet verified live end-to-end (needs the interval to actually elapse
+  with something real waiting in an inbox) — built and reviewed, not watched
+  run.
+
 ## THE BRAIN MOVED (2026-08-07) — read this before touching the avatar
 
 Sarah's brain is **no longer the browser page**. It is `sarah_agent.py`, a local
