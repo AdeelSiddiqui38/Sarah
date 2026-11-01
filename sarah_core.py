@@ -1051,12 +1051,61 @@ def invoice_job():
     fetch_invoices()
 
 
+def _got_this_month(v):
+    start = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
+    try:
+        return any(f.is_file() and not f.name.startswith("_") and f.stat().st_mtime >= start for f in vdir(v).iterdir())
+    except OSError:
+        return False
+
+
+def monthly_invoice_job():
+    """Monthly vendors: check from the 3rd; if nothing arrived, check again from the 10th (a week later), then flag."""
+    if not vault_get("gmail_app_password"):
+        return
+    today = datetime.now()
+    if today.day < 3:
+        return
+    for v in invoice_vendors():
+        if v.get("cadence") != "monthly":
+            continue
+        slug = re.sub(r"\W+", "_", v["folder"]).strip("_").lower()
+        base = f"invmo_{slug}_{today.year}-{today.month:02d}"
+        if setting(base + "_done"):
+            continue
+        if not setting(base + "_first"):
+            setting(base + "_first", now())
+            fetch_invoices()
+            if _got_this_month(v):
+                setting(base + "_done", now())
+            continue
+        if today.day >= 10 and not setting(base + "_retry"):
+            setting(base + "_retry", now())
+            fetch_invoices()
+            if _got_this_month(v):
+                setting(base + "_done", now())
+                continue
+            for p in list_projects():
+                if p.get("folder") and p["agents"].get("Finance"):
+                    title = f"Missing: {v['name']} invoice for {today.strftime('%B %Y')}"
+                    if not q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+                        make_draft(p, "Finance", title, f"I checked remedypillspharmacy@gmail.com on the 3rd and again on the 10th "
+                                   f"and found no new invoice from {v['sender']}. Check if it was sent from another address "
+                                   "or ask them to resend. I will keep catching it on the weekly Tuesday check.", actor="sarah")
+                    break
+            audit("sarah", "monthly_invoice_missing", {"vendor": v["name"]})
+
+
 def _task_loop():
     while True:
         try:
             invoice_job()
         except Exception as e:  # noqa: BLE001
             print("weekly invoice task error:", e, flush=True)
+        try:
+            monthly_invoice_job()
+        except Exception as e:  # noqa: BLE001
+            print("monthly invoice task error:", e, flush=True)
         try:
             monthly_statements_task()
         except Exception as e:  # noqa: BLE001
