@@ -34,6 +34,10 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "sarah.db"
 UI_FILE = BASE_DIR / "sarah-grid.html"
+LEDGER_DIR = Path(os.environ.get("SARAH_LEDGER_DIR", DATA_DIR / "ledger"))   # on the NAS: the Finance/Accounts folder on S:
+LEDGER_DATA = LEDGER_DIR / "ledger-data.json"
+LEDGER_HTML = Path(os.environ.get("SARAH_LEDGER_HTML", str(Path(os.environ.get("SARAH_PROJECTS_ROOT", Path.home() / "Documents")) / "Remedy Pills" / "Finance" / "Accounts" / "Remedy_Ledger_Main.html")))
+LEDGER_LOCAL_KEYS = {"remedy_page_v1", "remedy_theme_v1"}  # per-viewer look, not shared data
 HOST, PORT = "127.0.0.1", int(os.environ.get("SARAH_PORT", "8770"))
 SESSION_HOURS = 12
 MAX_FAILS, LOCK_SECONDS = 5, 300
@@ -454,6 +458,64 @@ def make_draft(p, agent, title, body, actor):
     return did
 
 
+# ------------------------------------------------------------------ ledger (one home for the data)
+_ledger_lock = threading.Lock()
+
+
+def ledger_read():
+    try:
+        return json.loads(LEDGER_DATA.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def ledger_write(data):
+    """Atomic write; keeps the previous version as .bak; file ownership follows the folder so SMB users can still manage it."""
+    LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = LEDGER_DATA.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    if LEDGER_DATA.exists():
+        try:
+            os.replace(LEDGER_DATA, LEDGER_DATA.with_suffix(".bak"))
+        except OSError:
+            pass
+    os.replace(tmp, LEDGER_DATA)
+    try:
+        st = LEDGER_DIR.stat()
+        for f in (LEDGER_DATA, LEDGER_DATA.with_suffix(".bak")):
+            if f.exists():
+                os.chown(f, st.st_uid, st.st_gid)
+                os.chmod(f, 0o660)
+    except (OSError, AttributeError):
+        pass
+
+
+LEDGER_SHIM = """<script>(function(){
+var X=new XMLHttpRequest();X.open('GET','/api/ledger-data',false);X.send();
+var D={};try{D=JSON.parse(X.responseText).data||{};}catch(e){}
+var LOCAL=%LOCAL%;var g=Storage.prototype.getItem,s=Storage.prototype.setItem,r=Storage.prototype.removeItem;
+function shared(k){return typeof k==='string'&&k.indexOf('remedy_')===0&&LOCAL.indexOf(k)<0;}
+var q=[],t=null;function flush(){t=null;var b=q;q=[];var set={},rm=[];b.forEach(function(o){if(o.v===null){rm.push(o.k);delete set[o.k];}else{set[o.k]=o.v;}});
+fetch('/api/ledger-data',{method:'POST',headers:{'Content-Type':'application/json','X-Sarah':'1'},body:JSON.stringify({set:set,remove:rm}),credentials:'same-origin'})
+.then(function(res){if(!res.ok)throw 0;badge('Saved to the NAS',true);}).catch(function(){badge('NOT SAVED - check connection',false);});}
+function queue(k,v){q.push({k:k,v:v});if(!t)t=setTimeout(flush,400);}
+Storage.prototype.getItem=function(k){return (this===window.localStorage&&shared(k))?(k in D?D[k]:null):g.call(this,k);};
+Storage.prototype.setItem=function(k,v){if(this===window.localStorage&&shared(k)){D[k]=String(v);queue(k,String(v));return;}return s.call(this,k,v);};
+Storage.prototype.removeItem=function(k){if(this===window.localStorage&&shared(k)){delete D[k];queue(k,null);return;}return r.call(this,k);};
+var B;function badge(m,ok){if(!B){B=document.createElement('div');B.style.cssText='position:fixed;right:10px;bottom:10px;z-index:99999;font:12px system-ui;padding:5px 10px;border-radius:6px;color:#fff;opacity:.92';(document.body||document.documentElement).appendChild(B);}
+B.textContent=m;B.style.background=ok?'#0f766e':'#b91c1c';if(ok){setTimeout(function(){if(B)B.style.opacity=0;},1800);B.style.opacity=.92;}else{B.style.opacity=.95;}}
+window.addEventListener('beforeunload',function(){if(q.length)flush();});
+})();</script>"""
+
+
+def ledger_page():
+    html = LEDGER_HTML.read_text(encoding="utf-8", errors="replace")
+    shim = LEDGER_SHIM.replace("%LOCAL%", json.dumps(sorted(LEDGER_LOCAL_KEYS)))
+    i = html.lower().find("<title")
+    i = i if i >= 0 else 0
+    return (html[:i] + shim + html[i:]).encode("utf-8")
+
+
 # ----------------------------------------------------------------------- server
 class H(BaseHTTPRequestHandler):
     server_version = "SarahCore/1.0"
@@ -475,9 +537,9 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def body(self):
+    def body(self, limit=200_000):
         n = int(self.headers.get("Content-Length") or 0)
-        if n > 200_000:
+        if n > limit:
             raise ValueError("too large")
         return json.loads(self.rfile.read(n) or b"{}")
 
@@ -505,6 +567,19 @@ class H(BaseHTTPRequestHandler):
             return self.send(403, {"error": "This Tailscale account is not allowed."})
         if path in ("/", "/index.html", "/sarah-grid.html"):
             return self.send(200, raw=UI_FILE.read_bytes(), ctype="text/html; charset=utf-8")
+        if path == "/ledger":
+            if not self.authed():
+                return self.send(302, raw=b"", headers={"Location": "/"})
+            try:
+                page = ledger_page()
+            except OSError:
+                return self.send(404, {"error": "Ledger file not found on the NAS (Finance/Accounts/Remedy_Ledger_Main.html)."})
+            audit("adeel", "ledger_open")
+            return self.send(200, raw=page, ctype="text/html; charset=utf-8")
+        if path == "/api/ledger-data":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            return self.send(200, {"data": ledger_read()})
         if path == "/api/state":
             return self.send(200, {"setup": bool(setting("pass_hash")), "authed": self.authed()})
         if not self.authed():
@@ -536,9 +611,28 @@ class H(BaseHTTPRequestHandler):
         if not self.same_origin():
             return self.send(403, {"error": "Blocked by the shield."})
         try:
-            b = self.body()
+            b = self.body(limit=8_000_000 if path == "/api/ledger-data" else 200_000)
         except (ValueError, json.JSONDecodeError):
             return self.send(400, {"error": "Bad request."})
+        if path == "/api/ledger-data":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            sets, rms = b.get("set") or {}, b.get("remove") or []
+            if not isinstance(sets, dict) or not isinstance(rms, list) or not all(str(k).startswith("remedy_") for k in list(sets) + rms):
+                return self.send(400, {"error": "Bad ledger data."})
+            with _ledger_lock:
+                data = ledger_read()
+                for k, v in sets.items():
+                    data[k] = v if isinstance(v, str) else json.dumps(v)
+                for k in rms:
+                    data.pop(k, None)
+                try:
+                    ledger_write(data)
+                except OSError as e:
+                    audit("sarah", "ledger_save_error", {"msg": str(e)[:200]})
+                    return self.send(500, {"error": "Could not write the ledger data to the NAS."})
+            audit("adeel", "ledger_save", {"keys": sorted(list(sets) + rms)})
+            return self.send(200, {"ok": True})
         if path == "/api/setup":
             if setting("pass_hash"):
                 return self.send(409, {"error": "Already set up."})
