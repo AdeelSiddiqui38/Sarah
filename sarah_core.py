@@ -41,6 +41,8 @@ MAX_SLOTS = 8
 AGENTS = ["Finance", "Coordinator", "Administration", "Marketing", "Social media", "HR"]
 MODEL = os.environ.get("SARAH_MODEL", "claude-haiku-5-5")
 ANTHROPIC_URL = os.environ.get("SARAH_ANTHROPIC_URL", "https://api.anthropic.com/v1/messages")
+OPENAI_MODEL = os.environ.get("SARAH_OPENAI_MODEL", "gpt-6.1-terra")
+OPENAI_URL = os.environ.get("SARAH_OPENAI_URL", "https://api.openai.com/v1/responses")
 DOCS = Path(os.environ.get("SARAH_PROJECTS_ROOT", Path.home() / "Documents"))
 # Extra page origins allowed to make changes, e.g. https://sarah.your-tailnet.ts.net (comma separated)
 EXTRA_ORIGINS = [o.strip().rstrip("/") for o in os.environ.get("SARAH_ORIGINS", "").split(",") if o.strip()]
@@ -306,6 +308,57 @@ def call_claude(messages, key):
         return json.loads(r.read())
 
 
+def brain_provider():
+    """Which brain answers: 'openai', 'claude' or 'local' (no key saved)."""
+    have = {"claude": bool(vault_get("anthropic_api_key")), "openai": bool(vault_get("openai_api_key"))}
+    pick = setting("brain_provider")
+    if pick in have and have[pick]:
+        return pick
+    return "openai" if have["openai"] else "claude" if have["claude"] else "local"
+
+
+def active_model():
+    return OPENAI_MODEL if brain_provider() == "openai" else MODEL
+
+
+def call_openai(items, key):
+    """OpenAI Responses API (tool calling needs it). Reasoning off: cheap, fast, no hidden items."""
+    tools = [{"type": "function", "name": t["name"], "description": t["description"], "parameters": t["input_schema"]} for t in TOOLS]
+    body = json.dumps({"model": OPENAI_MODEL, "instructions": system_prompt(), "input": items, "tools": tools,
+                       "max_output_tokens": 1024, "reasoning": {"effort": "none"}, "store": False}).encode()
+    req = urllib.request.Request(OPENAI_URL, data=body, method="POST", headers={
+        "content-type": "application/json", "authorization": "Bearer " + key})
+    with urllib.request.urlopen(req, timeout=90) as r:
+        return json.loads(r.read())
+
+
+def chat_openai(text, key):
+    _history.append({"role": "user", "content": text})
+    del _history[:-20]
+    items = [{"role": h["role"], "content": h["content"]} for h in _history]
+    reply = ""
+    for _ in range(4):
+        res = call_openai(items, key)
+        out = res.get("output", [])
+        texts = [c.get("text", "") for it in out if it.get("type") == "message"
+                 for c in it.get("content", []) if c.get("type") == "output_text"]
+        calls = [it for it in out if it.get("type") == "function_call"]
+        reply = " ".join(texts).strip() or reply
+        if not calls:
+            break
+        for c in calls:
+            try:
+                args = json.loads(c.get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            result = run_tool(c["name"], args)
+            audit("sarah", "tool:" + c["name"], {"input": args, "result": result})
+            items.append({"type": "function_call", "call_id": c["call_id"], "name": c["name"], "arguments": c.get("arguments") or "{}"})
+            items.append({"type": "function_call_output", "call_id": c["call_id"], "output": json.dumps(result)})
+    _history.append({"role": "assistant", "content": reply or "Done."})
+    return reply or "Done.", "openai"
+
+
 def run_tool(name, args):
     if name == "create_draft":
         p = find_project(args.get("project"))
@@ -329,9 +382,12 @@ _history = []  # short conversation memory for this server session
 
 
 def chat(text):
-    key = vault_get("anthropic_api_key")
-    if not key:
+    prov = brain_provider()
+    if prov == "local":
         return local_router(text), "local"
+    if prov == "openai":
+        return chat_openai(text, vault_get("openai_api_key"))
+    key = vault_get("anthropic_api_key")
     _history.append({"role": "user", "content": text})
     del _history[:-20]
     msgs = list(_history)
@@ -452,8 +508,9 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"entries": q("SELECT * FROM audit ORDER BY id DESC LIMIT 100"),
                                    "count": q("SELECT count(*) AS n FROM audit", one=True)["n"]})
         if path == "/api/vault":
-            return self.send(200, {"kind": VAULT_KIND, "names": vault_names(), "model": MODEL,
-                                   "brain": "claude" if vault_get("anthropic_api_key") else "local"})
+            return self.send(200, {"kind": VAULT_KIND, "names": vault_names(), "model": active_model(),
+                                   "brain": brain_provider(),
+                                   "have": {"claude": bool(vault_get("anthropic_api_key")), "openai": bool(vault_get("openai_api_key"))}})
         return self.send(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -540,10 +597,20 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"ok": True, "note": "Draft-only mode: recorded, nothing was sent."})
         if path == "/api/vault":
             name, value = str(b.get("name", "")), str(b.get("value", ""))
-            if name not in ("anthropic_api_key",) or len(value) < 20:
+            if name not in ("anthropic_api_key", "openai_api_key") or len(value) < 20:
                 return self.send(400, {"error": "Paste a valid key."})
+            if name == "openai_api_key" and not value.startswith("sk-"):
+                return self.send(400, {"error": "An OpenAI key starts with sk-."})
             vault_set(name, value)
+            setting("brain_provider", "openai" if name == "openai_api_key" else "claude")
             audit("adeel", "vault_set", {"name": name})
+            return self.send(200, {"ok": True})
+        if path == "/api/brain":
+            prov = b.get("provider")
+            if prov not in ("claude", "openai") or not vault_get("anthropic_api_key" if prov == "claude" else "openai_api_key"):
+                return self.send(400, {"error": "Save that provider's key first."})
+            setting("brain_provider", prov)
+            audit("adeel", "brain_switch", {"provider": prov})
             return self.send(200, {"ok": True})
         if path == "/api/chat":
             text = str(b.get("text", "")).strip()[:4000]
@@ -555,7 +622,7 @@ class H(BaseHTTPRequestHandler):
             except urllib.error.HTTPError as e:
                 msg = e.read().decode(errors="replace")[:300]
                 audit("sarah", "brain_error", {"status": e.code, "msg": msg})
-                return self.send(502, {"error": f"Claude returned {e.code}. Check the key in Settings.", "detail": msg})
+                return self.send(502, {"error": f"{'OpenAI' if brain_provider() == 'openai' else 'Claude'} returned {e.code}. Check the key and credit in Settings.", "detail": msg})
             except Exception as e:  # noqa: BLE001
                 audit("sarah", "brain_error", {"msg": str(e)[:300]})
                 return self.send(502, {"error": "I couldn't reach my brain. Check the internet connection."})

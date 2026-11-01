@@ -273,7 +273,7 @@ async function loadAudit(){ const d = await api('GET', '/api/audit'); $('auditCo
 async function loadVault(){
   const v = await api('GET', '/api/vault');
   $('vaultState').textContent = v.kind.startsWith('system') ? 'Keychain' : 'Local file'; $('vaultState').className = v.kind.startsWith('system') ? 'good' : 'warn';
-  $('brainState').textContent = v.brain === 'claude' ? 'Claude' : 'Local only (add key)'; $('brainState').className = v.brain === 'claude' ? 'good' : 'warn';
+  $('brainState').textContent = v.brain === 'claude' ? 'Claude' : v.brain === 'openai' ? 'OpenAI' : 'Local only (add key)'; $('brainState').className = v.brain !== 'local' ? 'good' : 'warn';
   return v;
 }
 setInterval(() => { if ($('gate').hidden) { loadDrafts().catch(() => {}); loadAudit().catch(() => {}); } }, 15000);
@@ -381,13 +381,16 @@ async function openSettings(){
   const v = await loadVault();
   makeModal(`<div><div class="sub">SHIELD · VAULT</div><h3 id="mTitle"></h3></div>
     <div class="kv"><span>Vault</span><b>${esc(v.kind)}</b></div>
-    <div class="kv"><span>Brain</span><b class="${v.brain === 'claude' ? 'good' : 'warn'}">${v.brain === 'claude' ? 'Claude (' + esc(v.model) + ')' : 'Local router only'}</b></div>
-    <form class="new" id="keyForm"><label for="ckey">Claude API key${v.names.includes('anthropic_api_key') ? ' (saved; paste a new one to replace it)' : ''}<input id="ckey" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
+    <div class="kv"><span>Brain</span><b class="${v.brain !== 'local' ? 'good' : 'warn'}">${v.brain === 'local' ? 'Local router only' : (v.brain === 'openai' ? 'OpenAI' : 'Claude') + ' (' + esc(v.model) + ')'}</b></div>
+    ${v.have.claude && v.have.openai ? `<div class="row"><button class="btn" id="useOpenai" type="button">Use OpenAI</button><button class="btn" id="useClaude" type="button">Use Claude</button></div>` : ''}
+    <form class="new" id="keyForm"><label for="pkind">Provider<select id="pkind"><option value="openai_api_key">OpenAI${v.have.openai ? ' (saved)' : ''}</option><option value="anthropic_api_key">Claude${v.have.claude ? ' (saved)' : ''}</option></select></label>
+    <label for="ckey">API key (paste a new one to replace a saved one)<input id="ckey" type="password" autocomplete="off" placeholder="sk-..."></label>
     <div class="err" id="keyErr" hidden></div><div class="row"><button class="btn" type="submit">Save to vault</button></div></form>
-    <p class="note">Keys go straight into the vault and are never shown again or sent anywhere except to Claude.</p>`);
+    <p class="note">Keys go straight into the vault and are never shown again or sent anywhere except to the provider you choose.</p>`);
+  for (const [id, p] of [['useOpenai', 'openai'], ['useClaude', 'claude']]) if ($(id)) $(id).onclick = async () => { try { await api('POST', '/api/brain', { provider: p }); sfx.ok(); await loadVault(); closeModal(); say('Switched brain to ' + (p === 'openai' ? 'OpenAI' : 'Claude') + '.'); } catch (x) { sfx.alert(); } };
   decode($('mTitle'), 'SETTINGS');
   $('keyForm').onsubmit = async e => { e.preventDefault(); const err = $('keyErr'); err.hidden = true;
-    try { await api('POST', '/api/vault', { name: 'anthropic_api_key', value: $('ckey').value.trim() }); sfx.ok(); await loadVault(); loadAudit(); closeModal(); say('Key saved to the vault. My full brain is online.'); }
+    try { await api('POST', '/api/vault', { name: $('pkind').value, value: $('ckey').value.trim() }); sfx.ok(); await loadVault(); loadAudit(); closeModal(); say('Key saved to the vault. My full brain is online.'); }
     catch (x) { err.textContent = x.message; err.hidden = false; sfx.alert(); } };
 }
 $('settingsBtn').onclick = () => { sfx.open(); openSettings(); };

@@ -600,3 +600,5 @@ own port **8770**.
 - Tested in a sandbox only; not yet run on real hardware or with a real key.
 - The Mac's local clone is behind GitHub. On the Mac, run
   `git fetch && git reset --hard origin/main` once before working there.
+
+- 2026-11-01: Brain providers. Sarah supports OpenAI (Responses API, `gpt-6.1-terra`, reasoning off, store=false; override `SARAH_OPENAI_MODEL`) and Claude (`claude-haiku-5-5`). Settings: pick provider, paste key into vault, switch with Use OpenAI / Use Claude. Dedicated OpenAI project key funds Sarah from the $8.47 credit.
