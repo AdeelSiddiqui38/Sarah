@@ -2,14 +2,8 @@
 
 Sarah Core runs on the NAS and is reachable only through Tailscale, from your phone, Mac or Windows PC, at home or away. Nothing is opened to the internet.
 
-## 1. Push the latest code (Mac, once)
-```
-cd ~/Documents/brain/Sarah
-git add .gitignore requirements.txt sarah_core.py sarah-grid.html "Sarah Grid.command" Sarah-Grid.bat deploy
-git commit -m "Sarah Core: shield, approvals, audit, TRON grid, TrueNAS deploy"
-git push
-```
-The NAS pulls the code from GitHub each time Sarah starts. Photos and `data/` are git-ignored.
+## 1. Code on GitHub
+Already pushed (1 Nov 2026). The NAS pulls the code from GitHub each time Sarah starts. Photos and `data/` are git-ignored.
 
 ## 2. Tailscale admin console (login.tailscale.com, 5 minutes)
 1. **DNS**: turn on **MagicDNS** and **HTTPS Certificates**. Note your tailnet name (like `tail1a2b3c.ts.net`).
