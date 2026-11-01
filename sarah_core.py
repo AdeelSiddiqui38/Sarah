@@ -777,8 +777,52 @@ def monthly_statements_task():
         audit("sarah", "monthly_statements_task", {"project": p["name"], "gaps": gaps})
 
 
+# ------------------------------------------------------- weekly invoice task
+INVOICE_SUBPATH = ("Finance", "Invoices", "Pharmacist - Nayel Anwer")
+
+
+def weekly_invoice_task():
+    """Every Tuesday leave a draft reminder to download the pharmacist's weekly invoice (draft-only)."""
+    today = datetime.now()
+    if today.weekday() != 1:  # Tuesday
+        return
+    iso = today.isocalendar()
+    key = f"invoice_task_{iso[0]}-W{iso[1]:02d}"
+    if setting(key):
+        return
+    setting(key, now())
+    for p in list_projects():
+        if not (p.get("folder") and p["agents"].get("Finance")):
+            continue
+        folder = os.path.join(str(p["folder"]), *INVOICE_SUBPATH)
+        count, latest = 0, ""
+        try:
+            files = [f for f in os.listdir(folder) if not f.startswith("_")]
+            count = len(files)
+            if files:
+                latest = max(files, key=lambda f: os.path.getmtime(os.path.join(folder, f)))
+        except OSError:
+            pass
+        title = f"Weekly: download pharmacist (Nayel Anwer) invoice, week of {today.strftime('%b %d')}"
+        if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+            continue
+        body = ("Weekly invoice check for " + p["name"] + ".\n"
+                f"Saved so far: {count} invoice file(s)" + (f"; newest saved: {latest}" if latest else "") + ".\n\n"
+                "Steps:\n"
+                "1. In remedypillspharmacy@gmail.com open Nayel Anwer's latest email, subject 'INVOICE RPP (date - date)'.\n"
+                "2. Download the attachment into S:\\Remedy Pills\\Finance\\Invoices\\Pharmacist - Nayel Anwer.\n"
+                "3. Ask Claude to do steps 1-2 for you: 'download this week's Nayel invoice'.\n"
+                "Nothing is paid or sent from here.")
+        make_draft(p, "Finance", title, body, actor="sarah")
+        audit("sarah", "weekly_invoice_task", {"project": p["name"], "saved": count})
+
+
 def _task_loop():
     while True:
+        try:
+            weekly_invoice_task()
+        except Exception as e:  # noqa: BLE001
+            print("weekly invoice task error:", e, flush=True)
         try:
             monthly_statements_task()
         except Exception as e:  # noqa: BLE001
