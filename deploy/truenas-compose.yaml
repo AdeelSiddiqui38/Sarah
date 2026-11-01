@@ -34,6 +34,7 @@ services:
     environment:
       SARAH_DATA_DIR: /data
       SARAH_PROJECTS_ROOT: /projects
+      SARAH_LEDGER_DIR: /ledger-data
       SARAH_ORIGINS: https://sarah.TAILNET.ts.net
       SARAH_ALLOWED_USERS: YOUR_TAILSCALE_LOGIN
       SARAH_SECURE_COOKIE: "1"
@@ -41,6 +42,8 @@ services:
     volumes:
       - /mnt/POOL/sarah/data:/data
       - /mnt/POOL/sarah/projects:/projects:ro
+      # the one writable spot: the ledger saves its data next to the ledger file
+      - "/mnt/POOL/sarah/projects/Remedy Pills/Finance/Accounts:/ledger-data"
     command: >
       sh -c "apk add --no-cache git >/dev/null &&
              (git -C /app pull --ff-only || git clone --depth 1 https://github.com/AdeelSiddiqui38/Sarah /app) &&
