@@ -846,7 +846,7 @@ INVOICE_EXT = (".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".png", ".jpg",
 DEFAULT_VENDORS = [
     {"name": "Nayel Anwer (pharmacist)", "sender": "nayelanwer@gmail.com", "cadence": "weekly",
      "folder": "Pharmacist - Nayel Anwer", "match": "invoice"},
-    {"name": "Kharb", "sender": "info@kharb.ca", "cadence": "monthly", "folder": "Kharb"},
+    {"name": "Kharb", "sender": "info@kharb.ca", "cadence": "monthly", "folder": "Kharb", "start": "2026-12"},
     {"name": "Pharma Planet Labs", "sender": "donotreply@app.helcim.com", "cadence": "once", "folder": "One-time/Pharma Planet Labs"},
     {"name": "Pharmaris", "sender": "accounting@pharmaris.com", "cadence": "once", "folder": "One-time/Pharmaris"},
     {"name": "fordbi (Shaw)", "sender": "fordbi@shaw.ca", "cadence": "once", "folder": "One-time/fordbi (Shaw)"},
@@ -1069,6 +1069,8 @@ def monthly_invoice_job():
     for v in invoice_vendors():
         if v.get("cadence") != "monthly":
             continue
+        if v.get("start") and f"{today.year}-{today.month:02d}" < v["start"]:
+            continue   # first monthly check starts in this month
         slug = re.sub(r"\W+", "_", v["folder"]).strip("_").lower()
         base = f"invmo_{slug}_{today.year}-{today.month:02d}"
         if setting(base + "_done"):
