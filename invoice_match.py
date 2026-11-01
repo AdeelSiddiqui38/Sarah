@@ -15,6 +15,8 @@ VENDOR_CATEGORY = {  # folder name -> ledger category for matched payments
     "Pharmacist - Nayel Anwer": "Wages - Nayel (Pharmacist)",
     "Kharb": "Delivery - Kharb (Rx delivery)",
 }
+# Name found in a bank line -> category (applies to every matching line, e.g. regular store supplies)
+DESC_RULES = {"THREE-ONE": "Store supplies"}
 DESC_HINT = {"NAYEL": "Pharmacist - Nayel Anwer", "KHARB": "Kharb"}
 TOL = 1.00          # dollars: still a match, but flagged
 WINDOW = (-3, 60)   # payment may be this many days before .. after the invoice date
@@ -170,6 +172,19 @@ def category_fixes(result, overrides):
         if want and m["category"] != want and m["key"] not in overrides:
             fixes[m["key"]] = want
     return fixes
+
+
+def rule_fixes(rows, overrides):
+    """Category rules by name in the bank line; never touches a line the owner already changed by hand."""
+    out = {}
+    for r in rows:
+        s = r.get("desc", "").upper().replace(" ", "")
+        for name, cat in DESC_RULES.items():
+            if name in s and r.get("category") != cat:
+                k = desc_key(r["date"], r["desc"], r["amount"])
+                if k not in overrides:
+                    out[k] = cat
+    return out
 
 
 def seed_rows(html_path):

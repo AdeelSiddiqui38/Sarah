@@ -507,6 +507,7 @@ def ledger_match(apply=False):
         rows = invoice_match.seed_rows(LEDGER_HTML) + added
         res = invoice_match.match(invoices, rows)
         fixes = invoice_match.category_fixes(res, over)
+        fixes.update(invoice_match.rule_fixes(rows, over))
         res["fixes"] = len(fixes)
         res["invoices"] = len(invoices)
         res["unreadable"] = unread
@@ -918,6 +919,8 @@ DEFAULT_VENDORS = [
     {"name": "Pharmaris", "sender": "accounting@pharmaris.com", "cadence": "once", "folder": "One-time/Pharmaris"},
     {"name": "fordbi (Shaw)", "sender": "fordbi@shaw.ca", "cadence": "once", "folder": "One-time/fordbi (Shaw)"},
     {"name": "Sharath Velagandula", "sender": "velagandula.sharath@gmail.com", "cadence": "once", "folder": "One-time/Sharath Velagandula"},
+    {"name": "Three-One Distributors", "sender": "", "cadence": "once", "folder": "One-time/Three-One Distributors",
+     "note": "Store supplies (shopping bags); paid by e-transfer. Add their email as sender once an invoice arrives."},
     {"name": "a.sid38 (Hotmail)", "sender": "a.sid38@hotmail.com", "cadence": "once", "folder": "One-time/a.sid38 (Hotmail)"},
 ]
 
@@ -934,6 +937,8 @@ def migrate_inbox():
     """Move files parked in _Inbox/<sender> into that sender's vendor folder once it is a known vendor."""
     moved = 0
     for v in invoice_vendors():
+        if not v.get("sender"):
+            continue
         src = INVOICE_DIR / "_Inbox" / _safe(v["sender"].lower())
         if not src.is_dir():
             continue
@@ -1044,7 +1049,7 @@ def fetch_invoices(days=None):
     since = datetime.now() - timedelta(days=days) if days else (datetime(2025, 12, 29) if first else datetime.now() - timedelta(days=21))
     since_s = since.strftime("%d-%b-%Y")
     vendors = invoice_vendors()
-    known = {v["sender"].lower() for v in vendors}
+    known = {v["sender"].lower() for v in vendors if v.get("sender")}
     result = {"saved": [], "unknown": [], "checked": since_s}
     M = imaplib.IMAP4_SSL("imap.gmail.com")
     try:
@@ -1059,6 +1064,8 @@ def fetch_invoices(days=None):
                     yield email.message_from_bytes(md[0][1], policy=email.policy.default)
 
         for v in vendors:
+            if not v.get("sender"):
+                continue   # vendor known by name only (paid by e-transfer, no invoice email address yet)
             for msg in grab(["FROM", f'"{v["sender"]}"', "SINCE", since_s]):
                 for name in _save_attachments(msg, vdir(v), v.get("match")):
                     result["saved"].append({"vendor": v["name"], "file": name})
