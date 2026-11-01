@@ -36,6 +36,8 @@ DB_PATH = DATA_DIR / "sarah.db"
 UI_FILE = BASE_DIR / "sarah-grid.html"
 LEDGER_DIR = Path(os.environ.get("SARAH_LEDGER_DIR", DATA_DIR / "ledger"))   # on the NAS: the Finance/Accounts folder on S:
 LEDGER_DATA = LEDGER_DIR / "ledger-data.json"
+INVOICE_DIR = Path(os.environ.get("SARAH_INVOICE_DIR", DATA_DIR / "invoices"))   # on the NAS: Remedy Pills/Finance/Invoices on S:
+GMAIL_USER = os.environ.get("SARAH_GMAIL_USER", "remedypillspharmacy@gmail.com")
 LEDGER_HTML = Path(os.environ.get("SARAH_LEDGER_HTML", str(Path(os.environ.get("SARAH_PROJECTS_ROOT", Path.home() / "Documents")) / "Remedy Pills" / "Finance" / "Accounts" / "Remedy_Ledger_Main.html")))
 LEDGER_LOCAL_KEYS = {"remedy_page_v1", "remedy_theme_v1"}  # per-viewer look, not shared data
 HOST, PORT = "127.0.0.1", int(os.environ.get("SARAH_PORT", "8770"))
@@ -600,7 +602,10 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/vault":
             return self.send(200, {"kind": VAULT_KIND, "names": vault_names(), "model": active_model(),
                                    "brain": brain_provider(),
-                                   "have": {"claude": bool(vault_get("anthropic_api_key")), "openai": bool(vault_get("openai_api_key"))}})
+                                   "have": {"claude": bool(vault_get("anthropic_api_key")), "openai": bool(vault_get("openai_api_key")),
+                                            "gmail": bool(vault_get("gmail_app_password"))}})
+        if path == "/api/invoices":
+            return self.send(200, invoice_status())
         return self.send(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -706,6 +711,13 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"ok": True, "note": "Draft-only mode: recorded, nothing was sent."})
         if path == "/api/vault":
             name, value = str(b.get("name", "")), str(b.get("value", ""))
+            if name == "gmail_app_password":
+                value = re.sub(r"\s+", "", value)
+                if not re.fullmatch(r"[a-z]{16}", value):
+                    return self.send(400, {"error": "A Google app password is 16 letters (spaces are fine)."})
+                vault_set(name, value)
+                audit("adeel", "vault_set", {"name": name})
+                return self.send(200, {"ok": True})
             if name not in ("anthropic_api_key", "openai_api_key") or len(value) < 20:
                 return self.send(400, {"error": "Paste a valid key."})
             if name == "openai_api_key" and not value.startswith("sk-"):
@@ -714,6 +726,13 @@ class H(BaseHTTPRequestHandler):
             setting("brain_provider", "openai" if name == "openai_api_key" else "claude")
             audit("adeel", "vault_set", {"name": name})
             return self.send(200, {"ok": True})
+        if path == "/api/invoices/run":
+            try:
+                res = fetch_invoices()
+            except Exception as e:  # noqa: BLE001
+                audit("sarah", "invoice_fetch_error", {"msg": str(e)[:300]})
+                return self.send(502, {"error": "Gmail fetch failed: " + str(e)[:200]})
+            return self.send(200, res)
         if path == "/api/brain":
             prov = b.get("provider")
             if prov not in ("claude", "openai") or not vault_get("anthropic_api_key" if prov == "claude" else "openai_api_key"):
@@ -817,10 +836,146 @@ def weekly_invoice_task():
         audit("sarah", "weekly_invoice_task", {"project": p["name"], "saved": count})
 
 
+# ------------------------------------------------------- invoices from Gmail (read-only IMAP)
+import email
+import email.policy
+import imaplib
+from datetime import timedelta
+
+INVOICE_EXT = (".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".png", ".jpg", ".jpeg")
+DEFAULT_VENDORS = [{"name": "Nayel Anwer (pharmacist)", "sender": "nayelanwer@gmail.com",
+                    "cadence": "weekly", "folder": "Pharmacist - Nayel Anwer"}]
+
+
+def invoice_vendors():
+    try:
+        v = json.loads(setting("invoice_vendors") or "")
+        if isinstance(v, list) and v:
+            return v
+    except ValueError:
+        pass
+    return DEFAULT_VENDORS
+
+
+def _safe(name):
+    name = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", name).strip(" .")
+    return name[:150] or "file"
+
+
+def _save_attachments(msg, dest):
+    """Save invoice-type attachments. Never overwrites: a different file with the same name gets ' (2)'."""
+    saved = []
+    for part in msg.walk():
+        fn = part.get_filename()
+        if not fn or not fn.lower().endswith(INVOICE_EXT):
+            continue
+        data = part.get_payload(decode=True) or b""
+        if not data:
+            continue
+        dest.mkdir(parents=True, exist_ok=True)
+        base = _safe(fn)
+        stem, ext = os.path.splitext(base)
+        target, n = dest / base, 1
+        while target.exists():
+            if target.stat().st_size == len(data):
+                target = None
+                break
+            n += 1
+            target = dest / f"{stem} ({n}){ext}"
+        if target is None:
+            continue
+        tmp = target.with_name(target.name + ".part")
+        tmp.write_bytes(data)
+        tmp.replace(target)
+        saved.append(target.name)
+    return saved
+
+
+def fetch_invoices(days=None):
+    """Read-only: pull invoice attachments for known vendors; park unknown invoice-like senders in _Inbox for review."""
+    pw = vault_get("gmail_app_password")
+    if not pw:
+        raise RuntimeError("Gmail app password is not in the vault yet.")
+    first = not setting("invoice_last_run")
+    since = datetime.now() - timedelta(days=days) if days else (datetime(2025, 12, 29) if first else datetime.now() - timedelta(days=21))
+    since_s = since.strftime("%d-%b-%Y")
+    vendors = invoice_vendors()
+    known = {v["sender"].lower() for v in vendors}
+    result = {"saved": [], "unknown": [], "checked": since_s}
+    M = imaplib.IMAP4_SSL("imap.gmail.com")
+    try:
+        M.login(GMAIL_USER, pw)
+        M.select('"[Gmail]/All Mail"', readonly=True)   # readonly: nothing is marked read, moved or deleted
+
+        def grab(criteria):
+            typ, data = M.search(None, *criteria)
+            for num in (data[0].split() if typ == "OK" else []):
+                typ, md = M.fetch(num, "(BODY.PEEK[])")
+                if typ == "OK" and md and md[0]:
+                    yield email.message_from_bytes(md[0][1], policy=email.policy.default)
+
+        for v in vendors:
+            for msg in grab(["FROM", f'"{v["sender"]}"', "SINCE", since_s]):
+                for name in _save_attachments(msg, INVOICE_DIR / _safe(v["folder"])):
+                    result["saved"].append({"vendor": v["name"], "file": name})
+        for kw in ("invoice", "statement", "bill"):
+            for msg in grab(["SUBJECT", kw, "SINCE", since_s]):
+                sender = email.utils.parseaddr(str(msg.get("From", "")))[1].lower()
+                if not sender or sender in known or sender == GMAIL_USER.lower():
+                    continue
+                names = _save_attachments(msg, INVOICE_DIR / "_Inbox" / _safe(sender))
+                if names:
+                    result["unknown"].append({"sender": sender, "subject": str(msg.get("Subject", ""))[:100], "files": names})
+    finally:
+        try:
+            M.logout()
+        except Exception:  # noqa: BLE001
+            pass
+    setting("invoice_last_run", now())
+    audit("sarah", "invoice_fetch", {"saved": len(result["saved"]), "unknown": len(result["unknown"])})
+    if result["unknown"]:
+        senders = sorted({u["sender"] for u in result["unknown"]})
+        for p in list_projects():
+            if p.get("folder") and p["agents"].get("Finance"):
+                title = "New invoice sender(s) to review: " + ", ".join(senders)[:120]
+                if not q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+                    lines = [f"- {u['sender']}: {u['subject']} ({', '.join(u['files'])})" for u in result["unknown"]]
+                    make_draft(p, "Finance", title, "These senders are not set up as vendors yet. Files are parked in "
+                               "Finance\\Invoices\\_Inbox\\<sender>.\n" + "\n".join(lines) +
+                               "\n\nTell Sarah/Claude which are real vendors and whether they bill weekly, monthly or once.", actor="sarah")
+                break
+    return result
+
+
+def invoice_status():
+    out = {"gmail": GMAIL_USER, "connected": bool(vault_get("gmail_app_password")),
+           "last_run": setting("invoice_last_run"), "vendors": []}
+    for v in invoice_vendors():
+        d = INVOICE_DIR / _safe(v["folder"])
+        try:
+            files = [f for f in d.iterdir() if f.is_file() and not f.name.startswith("_")]
+        except OSError:
+            files = []
+        out["vendors"].append({**v, "files": len(files)})
+    return out
+
+
+def invoice_job():
+    """Tuesday: fetch for real if Gmail is connected, else leave the manual reminder."""
+    if not vault_get("gmail_app_password"):
+        return weekly_invoice_task()
+    today = datetime.now()
+    key = f"invoice_fetch_{today.isocalendar()[0]}-W{today.isocalendar()[1]:02d}"
+    if today.weekday() != 1 or setting(key):
+        return
+    setting(key, now())
+    fetch_invoices()
+
+
 def _task_loop():
     while True:
         try:
-            weekly_invoice_task()
+            invoice_job()
         except Exception as e:  # noqa: BLE001
             print("weekly invoice task error:", e, flush=True)
         try:
