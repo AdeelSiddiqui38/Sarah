@@ -39,7 +39,7 @@ SESSION_HOURS = 12
 MAX_FAILS, LOCK_SECONDS = 5, 300
 MAX_SLOTS = 8
 AGENTS = ["Finance", "Coordinator", "Administration", "Marketing", "Social media", "HR"]
-MODEL = os.environ.get("SARAH_MODEL", "claude-sonnet-5-5")
+MODEL = os.environ.get("SARAH_MODEL", "claude-haiku-5-5")
 ANTHROPIC_URL = os.environ.get("SARAH_ANTHROPIC_URL", "https://api.anthropic.com/v1/messages")
 DOCS = Path(os.environ.get("SARAH_PROJECTS_ROOT", Path.home() / "Documents"))
 # Extra page origins allowed to make changes, e.g. https://sarah.your-tailnet.ts.net (comma separated)

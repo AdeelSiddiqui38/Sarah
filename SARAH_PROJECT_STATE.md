@@ -587,7 +587,7 @@ own port **8770**.
 - **`sarah_core.py`** (stdlib + optional `keyring`): passphrase login
   (scrypt), sessions, lockout, same-origin guard, vault (Keychain /
   Credential Manager or `data/vault.json`), SQLite `data/sarah.db` with
-  projects, drafts and audit log, Claude brain (`claude-sonnet-5-5`) with
+  projects, drafts and audit log, Claude brain (`claude-haiku-5-5`) with
   `create_draft` and `project_status` tools, local keyword fallback, and a
   read-only CRA checklist from `<project>/Finance/Bank Statements/<year>/`.
   Remedy Pills is seeded in slot 1.
