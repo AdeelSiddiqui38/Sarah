@@ -73,7 +73,7 @@ h2.ttl { margin: 0 0 10px; font: 600 12px/1 var(--f-display); letter-spacing: .2
 .check { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px dashed var(--cyan-dim); font-size: 13px; }
 .check .w { font: 12px/1 var(--f-mono); color: var(--dim); }
 .check .s { font: 12px/1 var(--f-mono); }
-.s.good { color: var(--good); } .s.off { color: var(--dim); } .s.warn { color: var(--orange); }
+.s.good { color: var(--good); } .s.off, .s.hold { color: var(--dim); } .s.warn { color: var(--orange); }
 .close { position: absolute; top: 10px; right: 12px; }
 form.new { display: flex; flex-direction: column; gap: 10px; }
 label { font: 12px/1 var(--f-mono); letter-spacing: .12em; color: var(--dim); text-transform: uppercase; display: flex; flex-direction: column; gap: 6px; }
@@ -416,7 +416,8 @@ function renderBrief(){
   projects.forEach(p => {
     if (p.pending) rows.push([p.name, p.pending + ' waiting for approval', 'warn']);
     const c = p.checklist; if (c) { const b = c.items[0]; rows.push([p.name + ': bank statements', b.missing && b.missing.length ? 'Missing ' + b.missing.join(', ') : b.state.replace('On file: ', ''), b.missing && b.missing.length ? 'warn' : 'good']);
-      const gaps = c.items.filter(i => i.level !== 'good').length; rows.push([p.name + ': CRA records', gaps + ' to sort out', gaps ? 'warn' : 'good']); }
+      const m = c.items[1]; if (m) rows.push([p.name + ': Mastercard', m.missing && m.missing.length ? 'Missing ' + m.missing.join(', ') : m.state.replace('On file: ', ''), m.missing && m.missing.length ? 'warn' : 'good']);
+      rows.push([p.name + ': other CRA records', 'On hold', 'off']); }
   });
   $('brief').innerHTML = rows.length ? rows.map(r => `<div class="kv"><span>${esc(r[0])}</span><b class="${r[2]}">${esc(r[1])}</b></div>`).join('') : '<p class="note">Nothing needs you right now.</p>';
 }

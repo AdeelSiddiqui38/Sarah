@@ -236,7 +236,16 @@ def finance_status(p):
                     if m is not None:
                         months.add(m)
                 out["statements"][ydir.name] = [MONTHS[i].title() for i in sorted(months)]
+    out["mastercard"] = {}
     fin = folder / "Finance"
+    if fin.is_dir():
+        for f in fin.rglob("*"):
+            if f.is_file() and re.search(r"mastercard|[-\s]mc\b", f.name, re.I):
+                y = re.search(r"(20\d\d)", f.name)
+                m = next((i for i, mn in enumerate(MONTHS) if mn in f.name.lower()), None)
+                if y and m is not None:
+                    out["mastercard"].setdefault(y.group(1), set()).add(m)
+        out["mastercard"] = {y: [MONTHS[i].title() for i in sorted(ms)] for y, ms in out["mastercard"].items()}
     if fin.is_dir():
         out["other_finance_files"] = sum(1 for f in fin.iterdir() if f.is_file() and not f.name.startswith("."))
     return out
@@ -251,15 +260,21 @@ def checklist(p):
     last_month = today.month - 1 if today.day >= 10 else today.month - 2
     expected = [MONTHS[i].title() for i in range(max(0, last_month))]
     missing = [m for m in expected if m not in have]
+    mc = fs.get("mastercard", {}).get(year, [])
+    mc_missing = [m for m in expected if m not in mc]
+    hold = "On hold (CRA later)"
     items = [
         {"when": "Monthly", "item": f"Bank statements {year}",
          "state": "On file: " + (f"{have[0]} to {have[-1]}" if have else "none"), "level": "good" if have and not missing else ("warn" if have else "off"),
          "missing": missing},
-        {"when": "Monthly", "item": "Purchase invoices and receipts", "state": "Not connected", "level": "off"},
-        {"when": "Monthly", "item": "Sales and dispensing reports", "state": "Not connected", "level": "off"},
-        {"when": "Each pay", "item": "Payroll records and remittances", "state": "Not connected", "level": "off"},
-        {"when": "Per period", "item": "GST/HST return working papers", "state": "Confirm filing period", "level": "warn"},
-        {"when": "Year-end", "item": "T2 package for the accountant", "state": "Builds through the year", "level": "warn"},
+        {"when": "Monthly", "item": f"Mastercard statements {year}",
+         "state": "On file: " + (f"{mc[0]} to {mc[-1]}" if mc else "none"), "level": "good" if mc and not mc_missing else ("warn" if mc else "off"),
+         "missing": mc_missing},
+        {"when": "Monthly", "item": "Purchase invoices and receipts", "state": hold, "level": "hold"},
+        {"when": "Monthly", "item": "Sales and dispensing reports", "state": hold, "level": "hold"},
+        {"when": "Each pay", "item": "Payroll records and remittances", "state": hold, "level": "hold"},
+        {"when": "Per period", "item": "GST/HST return working papers", "state": hold, "level": "hold"},
+        {"when": "Year-end", "item": "T2 package for the accountant", "state": hold, "level": "hold"},
     ]
     return {"folder_found": fs["folder_found"], "items": items}
 
@@ -636,11 +651,53 @@ class H(BaseHTTPRequestHandler):
             "Set-Cookie": f"sarah_session={tok}; Max-Age={SESSION_HOURS * 3600}; Path=/; HttpOnly; SameSite=Strict" + SECURE_COOKIE})
 
 
+# ------------------------------------------------------- monthly statements task
+def monthly_statements_task():
+    """On the 10th and 20th, if bank or Mastercard statements are missing, leave a draft reminder for Adeel (draft-only)."""
+    today = datetime.now()
+    if today.day < 10:
+        return
+    part = "p2" if today.day >= 20 else "p1"
+    key = f"stmt_task_{today.year}-{today.month:02d}-{part}"
+    if setting(key):
+        return
+    setting(key, now())
+    for p in list_projects():
+        if not (p.get("folder") and p["agents"].get("Finance")):
+            continue
+        items = checklist(p)["items"]
+        gaps = [(i["item"], i["missing"]) for i in items[:2] if i.get("missing")]
+        if not gaps:
+            continue
+        month = MONTHS[(today.month - 2) % 12].title()
+        title = f"Monthly: download {month} bank and Mastercard statements"
+        if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+            continue
+        lines = [f"- {name}: missing {', '.join(m)}" for name, m in gaps]
+        body = ("Monthly statement check for " + p["name"] + ".\n" + "\n".join(lines) +
+                "\n\nDownload the statements from BMO and Mastercard, then save them on S:\n"
+                "- Bank: Remedy Pills\\Finance\\Bank Statements\\" + str(today.year) + " (month name in the file name)\n"
+                "- Mastercard: Remedy Pills\\Finance\\Accounts\\Mastercard Statement (month name and year in the file name)\n"
+                "I will re-check on the next run and clear the gap once they are there.")
+        make_draft(p, "Finance", title, body, actor="sarah")
+        audit("sarah", "monthly_statements_task", {"project": p["name"], "gaps": gaps})
+
+
+def _task_loop():
+    while True:
+        try:
+            monthly_statements_task()
+        except Exception as e:  # noqa: BLE001
+            print("monthly task error:", e, flush=True)
+        time.sleep(3600)
+
+
 def main():
     init_db()
     if HOST not in ("127.0.0.1", "localhost"):
         sys.exit("Refusing to listen outside this computer.")
     srv = ThreadingHTTPServer((HOST, PORT), H)
+    threading.Thread(target=_task_loop, daemon=True).start()
     print(f"Sarah Core online at http://{HOST}:{PORT}  (vault: {VAULT_KIND})", flush=True)
     try:
         srv.serve_forever()
