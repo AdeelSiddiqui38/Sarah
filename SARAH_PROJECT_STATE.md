@@ -568,3 +568,35 @@ AND live site.
   connected folders" errors. Copy scratch files into the BRAIN mount via
   bash `cp`, then `Read` them via the Windows-style path, to preview
   anything built in the sandbox before it's considered final.
+
+## Sarah Core + Sarah Grid (added 2026-11-01, built from the Mac session)
+
+A second, self-contained stack alongside the avatar/agent above. It does not
+replace `sarah_server.py` (8765) or `sarah_agent.py` (8766); it runs on its
+own port **8770**.
+
+- **Architecture decided with Adeel:** Sarah is the core; around her a
+  **safety shield** (login, vault, approval gate, audit log); around that
+  **project slots**. RULE: one project per slot, and **Adeel names every
+  project and defines what belongs in it**. Not every request becomes a
+  project; unrelated requests are one-offs. Agents per project (Finance,
+  Coordinator, Administration, Marketing, Social media, HR) start off and run
+  in **draft-only mode** (they prepare, Adeel approves; nothing executes).
+- **Look:** TRON-style control room (`sarah-grid.html`), chosen over the
+  solar-system and photo/cartoon face experiments.
+- **`sarah_core.py`** (stdlib + optional `keyring`): passphrase login
+  (scrypt), sessions, lockout, same-origin guard, vault (Keychain /
+  Credential Manager or `data/vault.json`), SQLite `data/sarah.db` with
+  projects, drafts and audit log, Claude brain (`claude-sonnet-5-5`) with
+  `create_draft` and `project_status` tools, local keyword fallback, and a
+  read-only CRA checklist from `<project>/Finance/Bank Statements/<year>/`.
+  Remedy Pills is seeded in slot 1.
+- **Launchers:** `Sarah Grid.command` (Mac), `Sarah-Grid.bat` (Windows), then
+  open http://127.0.0.1:8770.
+- **24/7 home decided: Adeel's TrueNAS SCALE 25.10** (hostname `truenas`,
+  10.0.0.110), reached only through **Tailscale**. See `deploy/TRUENAS.md`
+  and `deploy/truenas-compose.yaml`. Next step for Adeel: Tailscale MagicDNS
+  + HTTPS + auth key, create the `sarah` dataset, install the YAML app.
+- Tested in a sandbox only; not yet run on real hardware or with a real key.
+- The Mac's local clone is behind GitHub. On the Mac, run
+  `git fetch && git reset --hard origin/main` once before working there.

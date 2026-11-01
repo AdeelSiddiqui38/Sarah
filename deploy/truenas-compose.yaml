@@ -1,0 +1,55 @@
+# Sarah Core on TrueNAS SCALE 25.10 (Apps > Discover > Custom App > Install via YAML)
+# Replace the 4 values marked REPLACE before saving:
+#   POOL            your pool name (Storage screen), used in 3 paths
+#   tskey-auth-...  a Tailscale auth key (admin console > Settings > Keys)
+#   TAILNET         your tailnet name (admin console > DNS), e.g. tail1a2b3c
+#   YOUR_TAILSCALE_LOGIN  the email you sign in to Tailscale with
+# Sarah is reachable ONLY over Tailscale at https://sarah.TAILNET.ts.net (no LAN or internet port is opened).
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: sarah
+    environment:
+      - TS_AUTHKEY=tskey-auth-REPLACE
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_USERSPACE=false
+      - TS_AUTH_ONCE=true
+    configs:
+      - source: ts-serve
+        target: /config/serve.json
+    volumes:
+      - /mnt/POOL/sarah/tailscale:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    restart: always
+
+  sarah:
+    image: python:3.12-alpine
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    environment:
+      SARAH_DATA_DIR: /data
+      SARAH_PROJECTS_ROOT: /projects
+      SARAH_ORIGINS: https://sarah.TAILNET.ts.net
+      SARAH_ALLOWED_USERS: YOUR_TAILSCALE_LOGIN
+      SARAH_SECURE_COOKIE: "1"
+      TZ: America/Edmonton
+    volumes:
+      - /mnt/POOL/sarah/data:/data
+      - /mnt/POOL/sarah/projects:/projects:ro
+    command: >
+      sh -c "apk add --no-cache git >/dev/null &&
+             (git -C /app pull --ff-only || git clone --depth 1 https://github.com/AdeelSiddiqui38/Sarah /app) &&
+             cd /app && exec python sarah_core.py"
+    restart: always
+
+configs:
+  ts-serve:
+    content: |
+      {"TCP": {"443": {"HTTPS": true}},
+       "Web": {"$${TS_CERT_DOMAIN}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8770"}}}},
+       "AllowFunnel": {"$${TS_CERT_DOMAIN}:443": false}}

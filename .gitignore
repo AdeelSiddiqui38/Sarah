@@ -17,3 +17,13 @@ files.zip
 
 # Live conversation id — machine-local, not shared
 .sarah_session
+
+# Private photos of Sarah - never push
+Sarah Image/
+20211205_110239.jpg
+*.jpg
+*.jpeg
+*.heic
+
+# Sarah Core local data: database, vault fallback (never push)
+data/

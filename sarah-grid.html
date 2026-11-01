@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sarah</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: TRON control room. Left = system status, centre = Sarah's core with project slots around it, right = approvals and brief, bottom = command line. Phones stack the panels under the core. */
+:root {
+  --bg: #02060a;
+  --panel: rgba(4, 18, 24, .78);
+  --cyan: #3df2ff;
+  --cyan-2: #18a9b8;
+  --cyan-dim: #0f4a54;
+  --orange: #ff9a3c;
+  --ink: #d6f7ff;
+  --dim: #6b98a3;
+  --good: #49f2a5;
+  --f-display: "Oxanium", "Rajdhani", system-ui, sans-serif;
+  --f-mono: "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-display); }
+.hud { min-height: 100%; display: grid; grid-template-columns: 270px minmax(0, 1fr) 310px; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px;
+  padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); box-sizing: border-box; height: 100%; }
+.top { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.logo { font: 700 22px/1 var(--f-display); letter-spacing: .5em; color: var(--cyan); text-shadow: 0 0 12px rgba(61,242,255,.7); }
+.tag { font: 13px/1 var(--f-mono); color: var(--dim); padding: 6px 10px; border: 1px solid var(--cyan-dim); clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.tag.warn { color: var(--orange); border-color: #6a3d12; }
+.tag.ok { color: var(--good); border-color: #145a3c; }
+.spacer { flex: 1; }
+.clock { font: 15px/1 var(--f-mono); color: var(--cyan); letter-spacing: .1em; }
+.tbtn { font: 13px/1 var(--f-mono); color: var(--cyan); background: transparent; border: 1px solid var(--cyan-dim); padding: 7px 10px; cursor: pointer; }
+.tbtn:hover, .tbtn:focus-visible { border-color: var(--cyan); box-shadow: 0 0 10px rgba(61,242,255,.35); outline: none; }
+
+.frame { position: relative; background: var(--panel); border: 1px solid var(--cyan-dim); padding: 14px; min-width: 0;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+.frame::before { content: ""; position: absolute; left: 0; top: 0; width: 60px; height: 2px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.side { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
+h2.ttl { margin: 0 0 10px; font: 600 12px/1 var(--f-display); letter-spacing: .28em; text-transform: uppercase; color: var(--cyan); }
+.kv { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--cyan-dim); font-size: 13px; }
+.kv:last-child { border-bottom: 0; }
+.kv b { font: 13px/1.3 var(--f-mono); font-weight: 400; color: var(--cyan); text-align: right; }
+.kv b.warn { color: var(--orange); } .kv b.good { color: var(--good); } .kv b.off { color: var(--dim); }
+.bar { height: 4px; background: var(--cyan-dim); margin-top: 6px; overflow: hidden; } .bar i { display: block; height: 100%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.note { font: 12.5px/1.45 var(--f-mono); color: var(--dim); margin: 0; }
+
+.stage { position: relative; min-height: 0; overflow: hidden; border: 1px solid var(--cyan-dim); background: radial-gradient(circle at 50% 45%, rgba(24,169,184,.12), transparent 60%); }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.state { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); font: 13px/1 var(--f-mono); letter-spacing: .3em; color: var(--cyan); text-shadow: 0 0 8px var(--cyan); pointer-events: none; text-transform: uppercase; }
+.state.alert { color: var(--orange); text-shadow: 0 0 8px var(--orange); }
+.slots { position: absolute; inset: 0; pointer-events: none; }
+.slot { position: absolute; width: 132px; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; text-align: center; padding: 9px 8px; font: 600 12px/1.25 var(--f-display); letter-spacing: .06em;
+  color: var(--cyan); background: rgba(2, 14, 18, .82); border: 1px solid var(--cyan-2); clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
+  transition: transform .15s, background .15s, color .15s; }
+.slot small { display: block; font: 11px/1.2 var(--f-mono); letter-spacing: .04em; color: var(--dim); margin-top: 3px; font-weight: 400; }
+.slot:hover, .slot:focus-visible { background: rgba(61, 242, 255, .16); transform: translate(-50%, -50%) scale(1.06); outline: none; }
+.slot.empty { color: var(--dim); border-style: dashed; border-color: var(--cyan-dim); font-weight: 500; }
+.slot.empty:hover { color: var(--cyan); }
+.slot.active { background: rgba(61, 242, 255, .22); color: #fff; }
+
+.modal { background: rgba(2, 10, 14, .96); position: absolute; inset: 8% 6%; display: flex; flex-direction: column; gap: 12px; overflow: auto; z-index: 3; animation: open .28s ease-out; }
+@keyframes open { from { transform: scaleY(.04); opacity: .2; } to { transform: none; opacity: 1; } }
+.modal h3 { margin: 0; font: 700 22px/1.1 var(--f-display); letter-spacing: .08em; color: #fff; text-wrap: balance; }
+.modal .sub { font: 12.5px/1.4 var(--f-mono); color: var(--dim); }
+.mods { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mod { padding: 10px; border: 1px solid var(--cyan-dim); background: rgba(2,14,18,.7); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.mod button { align-self: flex-start; font: 12px/1 var(--f-mono); padding: 5px 8px; background: transparent; color: var(--dim); border: 1px solid var(--cyan-dim); cursor: pointer; }
+.mod button.on { color: var(--orange); border-color: var(--orange); }
+.check { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px dashed var(--cyan-dim); font-size: 13px; }
+.check .w { font: 12px/1 var(--f-mono); color: var(--dim); }
+.check .s { font: 12px/1 var(--f-mono); }
+.s.good { color: var(--good); } .s.off { color: var(--dim); } .s.warn { color: var(--orange); }
+.close { position: absolute; top: 10px; right: 12px; }
+form.new { display: flex; flex-direction: column; gap: 10px; }
+label { font: 12px/1 var(--f-mono); letter-spacing: .12em; color: var(--dim); text-transform: uppercase; display: flex; flex-direction: column; gap: 6px; }
+input, textarea { font: 14px/1.4 var(--f-display); color: var(--ink); background: rgba(0,0,0,.4); border: 1px solid var(--cyan-dim); padding: 9px 10px; text-transform: none; letter-spacing: 0; }
+textarea { min-height: 64px; resize: vertical; }
+input:focus, textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 10px rgba(61,242,255,.3); }
+.err { color: var(--orange); font: 12.5px/1.4 var(--f-mono); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { font: 600 13px/1 var(--f-display); letter-spacing: .14em; text-transform: uppercase; padding: 10px 14px; cursor: pointer; color: var(--bg); background: var(--cyan); border: 1px solid var(--cyan);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.btn.ghost { background: transparent; color: var(--cyan); }
+.btn.amber { background: var(--orange); border-color: var(--orange); }
+.btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+.queue { display: flex; flex-direction: column; gap: 8px; }
+.card { border: 1px solid #6a3d12; padding: 10px; background: rgba(40, 20, 4, .45); display: flex; flex-direction: column; gap: 8px; }
+.card .h { font: 12px/1 var(--f-mono); color: var(--orange); letter-spacing: .12em; }
+.card p { margin: 0; font-size: 13px; }
+
+.cmd { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+#log { max-height: 92px; overflow: auto; font: 13px/1.5 var(--f-mono); display: flex; flex-direction: column; gap: 2px; }
+#log .me { color: var(--dim); } #log .sa { color: var(--ink); } #log .sa b { color: var(--cyan); font-weight: 400; }
+.line { display: flex; gap: 8px; align-items: stretch; }
+.prompt { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; border: 1px solid var(--cyan-2); background: rgba(0,0,0,.5); padding: 0 10px; }
+.prompt span { font: 16px/1 var(--f-mono); color: var(--cyan); }
+.prompt input { flex: 1; min-width: 0; border: 0; background: transparent; font: 15px/1 var(--f-mono); padding: 12px 0; box-shadow: none; }
+
+@media (max-width: 980px) {
+  .hud { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; }
+  .stage { height: 68vh; min-height: 460px; order: 1; }
+  .left { order: 2; } .right { order: 3; }
+  .cmd { order: 4; position: sticky; bottom: 0; background: var(--bg); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .slot { width: 112px; font-size: 11px; }
+  .mods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modal { inset: 4%; }
+}
+@media (prefers-reduced-motion: reduce) { .modal { animation: none; } .slot { transition: none; } }
+</style>
+</head>
+<body>
+<style>
+[hidden] { display: none !important; }
+body { margin: 0; }
+.overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(1, 5, 8, .92); z-index: 20; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.overlay .frame { width: min(420px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.overlay h3 { margin: 0; font: 700 22px/1.1 var(--f-display); letter-spacing: .3em; color: var(--cyan); }
+.mic { min-width: 52px; }
+.mic.on { background: var(--orange); border-color: var(--orange); color: var(--bg); }
+.audit-row { display: grid; grid-template-columns: 150px 90px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--cyan-dim); font: 12px/1.4 var(--f-mono); }
+.audit-row span:last-child { color: var(--dim); overflow-wrap: anywhere; }
+.draft-body { white-space: pre-wrap; font-size: 13px; max-height: 140px; overflow: auto; }
+@media (max-width: 600px) { .audit-row { grid-template-columns: 1fr; } }
+</style>
+
+<div class="hud">
+  <div class="top">
+    <span class="logo" id="logo">SARAH</span>
+    <span class="tag warn">DRAFT-ONLY MODE</span>
+    <span class="tag ok" id="shieldTag">SHIELD: ACTIVE</span>
+    <span class="spacer"></span>
+    <button class="tbtn" type="button" id="settingsBtn">SETTINGS</button>
+    <button class="tbtn" type="button" id="soundBtn" aria-pressed="true">SOUND ON</button>
+    <button class="tbtn" type="button" id="voiceBtn" aria-pressed="false">VOICE OFF</button>
+    <button class="tbtn" type="button" id="lockBtn">LOCK</button>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+
+  <aside class="side left">
+    <section class="frame">
+      <h2 class="ttl">System</h2>
+      <div class="kv"><span>Core</span><b class="good" id="coreState">Idle</b></div>
+      <div class="kv"><span>Mode</span><b class="warn">Draft-only</b></div>
+      <div class="kv"><span>Brain</span><b id="brainState" class="off">Checking</b></div>
+      <div class="kv"><span>Projects</span><b id="projCount">0 / 8</b></div>
+      <div class="kv"><span>Agents on</span><b id="agentCount">0</b></div>
+    </section>
+    <section class="frame">
+      <h2 class="ttl">Safety shield</h2>
+      <div class="kv"><span>Login</span><b class="good">Active</b></div>
+      <div class="kv"><span>Vault</span><b id="vaultState" class="off">Checking</b></div>
+      <div class="kv"><span>Approval gate</span><b class="good">Active</b></div>
+      <div class="kv"><span>Audit log</span><b id="auditCount">0 entries</b></div>
+      <div class="row" style="margin-top:10px"><button class="btn ghost" type="button" id="auditBtn">View audit log</button></div>
+    </section>
+    <section class="frame">
+      <h2 class="ttl">Rule</h2>
+      <p class="note">One project per slot. You name each project and define what belongs in it. Anything else is a one-off and never becomes a project on its own.</p>
+    </section>
+  </aside>
+
+  <main class="stage" id="stage">
+    <canvas id="core" aria-label="Sarah's core, surrounded by project slots"></canvas>
+    <div class="state" id="stateLbl">IDLE</div>
+    <div class="slots" id="slots"></div>
+  </main>
+
+  <aside class="side right">
+    <section class="frame">
+      <h2 class="ttl">Approval queue</h2>
+      <div class="queue" id="queue"><p class="note">No drafts waiting.</p></div>
+    </section>
+    <section class="frame">
+      <h2 class="ttl">Morning brief</h2>
+      <div id="brief"><p class="note">Loading.</p></div>
+    </section>
+  </aside>
+
+  <div class="cmd">
+    <div id="log" aria-live="polite"></div>
+    <form class="line" id="cmdForm" autocomplete="off">
+      <label class="prompt" for="cmdInput" style="flex-direction:row;letter-spacing:0;text-transform:none"><span>&gt;</span><input id="cmdInput" type="text" placeholder="Talk or type to Sarah. Press / to focus." aria-label="Command Sarah"></label>
+      <button class="btn ghost mic" type="button" id="micBtn" aria-pressed="false" title="Talk to Sarah">MIC</button>
+      <button class="btn" type="submit">Run</button>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="gate" hidden>
+  <form class="frame" id="gateForm">
+    <h3>SARAH</h3>
+    <p class="note" id="gateMsg">Enter your passphrase.</p>
+    <label for="pass">Passphrase<input id="pass" type="password" autocomplete="current-password" required></label>
+    <label for="pass2" id="pass2Wrap" hidden>Repeat passphrase<input id="pass2" type="password" autocomplete="new-password"></label>
+    <div class="err" id="gateErr" hidden></div>
+    <button class="btn" type="submit" id="gateBtn">Unlock</button>
+  </form>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+let SLOTS = 8, AGENTS = [], projects = [], drafts = [];
+
+async function api(method, path, body){
+  const r = await fetch(path, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Sarah': '1' }, body: body ? JSON.stringify(body) : undefined });
+  let data = {}; try { data = await r.json(); } catch (e) {}
+  if (r.status === 401 && path !== '/api/login') { showGate(true); }
+  if (!r.ok) throw Object.assign(new Error(data.error || ('Error ' + r.status)), { status: r.status });
+  return data;
+}
+
+// ---------------- sound -------------------------------------------------------------------------------
+let ac = null, soundOn = true;
+try { soundOn = localStorage.getItem('sarah_tron_sound') !== '0'; } catch (e) {}
+function blip(f1, f2, dur, type, vol){ if (!soundOn) return; try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === 'suspended') ac.resume();
+  const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime; o.type = type || 'square'; o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  g.gain.setValueAtTime(vol || .04, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur); o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {} }
+const sfx = { hover: () => blip(2200, 2600, .03, 'sine', .015), click: () => blip(700, 1400, .07, 'square', .03), open: () => blip(300, 1200, .18, 'sawtooth', .025),
+  alert: () => { blip(880, 660, .12, 'square', .04); setTimeout(() => blip(880, 660, .12, 'square', .04), 160); }, ok: () => blip(600, 1800, .12, 'sine', .04) };
+function syncSound(){ $('soundBtn').textContent = soundOn ? 'SOUND ON' : 'SOUND OFF'; $('soundBtn').setAttribute('aria-pressed', soundOn); }
+$('soundBtn').onclick = () => { soundOn = !soundOn; try { localStorage.setItem('sarah_tron_sound', soundOn ? '1' : '0'); } catch (e) {} syncSound(); sfx.click(); };
+syncSound();
+let voiceOn = false; try { voiceOn = localStorage.getItem('sarah_voice') === '1'; } catch (e) {}
+function syncVoice(){ $('voiceBtn').textContent = voiceOn ? 'VOICE ON' : 'VOICE OFF'; $('voiceBtn').setAttribute('aria-pressed', voiceOn); }
+$('voiceBtn').onclick = () => { voiceOn = !voiceOn; try { localStorage.setItem('sarah_voice', voiceOn ? '1' : '0'); } catch (e) {} syncVoice(); sfx.click(); };
+syncVoice();
+
+function decode(el, text){
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&/<>', n = text.length; let f = 0;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = text; return; }
+  const id = setInterval(() => { f++; el.textContent = text.split('').map((c, i) => i < f / 2 || c === ' ' ? c : chars[Math.random() * chars.length | 0]).join(''); if (f / 2 >= n) { clearInterval(id); el.textContent = text; } }, 28);
+}
+
+// ---------------- gate (login / first-time setup) ----------------------------------------------------------------
+let setupMode = false;
+function showGate(show){
+  $('gate').hidden = !show;
+  if (show) { $('pass').value = ''; $('pass2').value = ''; $('gateErr').hidden = true; setTimeout(() => $('pass').focus(), 50); }
+}
+async function boot(){
+  const s = await api('GET', '/api/state');
+  setupMode = !s.setup;
+  $('pass2Wrap').hidden = !setupMode;
+  $('gateMsg').textContent = setupMode ? 'First run: choose a passphrase of at least 10 characters. It protects everything Sarah can see.' : 'Enter your passphrase.';
+  $('gateBtn').textContent = setupMode ? 'Set passphrase' : 'Unlock';
+  if (s.authed) { showGate(false); await refreshAll(); greet(); } else showGate(true);
+}
+$('gateForm').onsubmit = async e => {
+  e.preventDefault(); const p = $('pass').value, err = $('gateErr'); err.hidden = true;
+  try {
+    if (setupMode) { if (p !== $('pass2').value) throw new Error('The two passphrases are different.'); await api('POST', '/api/setup', { passphrase: p }); }
+    else await api('POST', '/api/login', { passphrase: p });
+    sfx.ok(); showGate(false); await refreshAll(); greet();
+  } catch (x) { err.textContent = x.message; err.hidden = false; sfx.alert(); }
+};
+$('lockBtn').onclick = async () => { sfx.click(); try { await api('POST', '/api/logout', {}); } catch (e) {} location.reload(); };
+
+// ---------------- data -----------------------------------------------------------------------------------------
+async function refreshAll(){ await Promise.all([loadProjects(), loadDrafts(), loadAudit(), loadVault()]); }
+async function loadProjects(){
+  const d = await api('GET', '/api/projects'); projects = d.projects; SLOTS = d.slots; AGENTS = d.agents;
+  renderSlots(); renderBrief();
+}
+async function loadDrafts(){ const d = await api('GET', '/api/drafts'); drafts = d.drafts; renderQueue(); }
+async function loadAudit(){ const d = await api('GET', '/api/audit'); $('auditCount').textContent = d.count + (d.count === 1 ? ' entry' : ' entries'); return d; }
+async function loadVault(){
+  const v = await api('GET', '/api/vault');
+  $('vaultState').textContent = v.kind.startsWith('system') ? 'Keychain' : 'Local file'; $('vaultState').className = v.kind.startsWith('system') ? 'good' : 'warn';
+  $('brainState').textContent = v.brain === 'claude' ? 'Claude' : 'Local only (add key)'; $('brainState').className = v.brain === 'claude' ? 'good' : 'warn';
+  return v;
+}
+setInterval(() => { if ($('gate').hidden) { loadDrafts().catch(() => {}); loadAudit().catch(() => {}); } }, 15000);
+
+// ---------------- three.js core ------------------------------------------------------------------------------------
+const stage = $('stage'), canvas = $('core');
+const R = new THREE.WebGLRenderer({ canvas, antialias: true });
+R.setPixelRatio(Math.min(2, devicePixelRatio || 1)); R.setClearColor(0x02060a, 1);
+const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x02060a, 18, 60);
+const cam = new THREE.PerspectiveCamera(45, 1, .1, 200);
+const CY = 0x3df2ff, OR = 0xff9a3c;
+const lineMat = (c, o) => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: o });
+const grid = new THREE.GridHelper(120, 60, 0x18a9b8, 0x0f4a54); grid.position.y = -5.2; grid.material.transparent = true; grid.material.opacity = .55; scene.add(grid);
+const core = new THREE.Group(); scene.add(core);
+const inner = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.25, 1)), lineMat(CY, .9)); core.add(inner);
+const innerFill = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshBasicMaterial({ color: CY, transparent: true, opacity: .07 })); core.add(innerFill);
+function arcRing(r, segs, gap, width, color, op){ const g = new THREE.Group(), step = Math.PI * 2 / segs;
+  for (let i = 0; i < segs; i++) g.add(new THREE.Mesh(new THREE.RingGeometry(r, r + width, 24, 1, i * step + gap / 2, step - gap), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide })));
+  return g; }
+function ticks(r, n, len, color, op){ const pts = []; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, l = i % 5 === 0 ? len * 2 : len; pts.push(Math.cos(a) * r, Math.sin(a) * r, 0, Math.cos(a) * (r + l), Math.sin(a) * (r + l), 0); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); return new THREE.LineSegments(g, lineMat(color, op)); }
+const ringA = arcRing(2.0, 3, .5, .08, CY, .9), ringB = arcRing(2.45, 12, .12, .04, CY, .55), tick = ticks(2.75, 120, .1, CY, .5), ringC = arcRing(3.2, 2, 1.2, .05, CY, .7), shield = arcRing(3.75, 24, .08, .1, CY, .35);
+core.add(ringA, ringB, tick, ringC, shield);
+const gyro1 = new THREE.Mesh(new THREE.TorusGeometry(1.75, .012, 6, 120), new THREE.MeshBasicMaterial({ color: CY, transparent: true, opacity: .6 })), gyro2 = gyro1.clone();
+gyro1.rotation.x = 1.1; gyro2.rotation.y = 1.1; core.add(gyro1, gyro2);
+const PN = 420, pp = new Float32Array(PN * 3), pd = [];
+for (let i = 0; i < PN; i++) pd.push({ a: Math.random() * 6.283, r: 1.5 + Math.random() * 2.6, s: (.1 + Math.random() * .4) * (Math.random() < .5 ? -1 : 1), y: (Math.random() - .5) * .5 });
+const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.BufferAttribute(pp, 3));
+core.add(new THREE.Points(pg, new THREE.PointsMaterial({ color: CY, size: .045, transparent: true, opacity: .8 })));
+const gc = document.createElement('canvas'); gc.width = gc.height = 128; const gx = gc.getContext('2d'), gr = gx.createRadialGradient(64, 64, 0, 64, 64, 64);
+gr.addColorStop(0, 'rgba(61,242,255,.55)'); gr.addColorStop(1, 'rgba(61,242,255,0)'); gx.fillStyle = gr; gx.fillRect(0, 0, 128, 128);
+const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(gc), blending: THREE.AdditiveBlending, depthWrite: false })); glow.scale.set(7, 7, 1); core.add(glow);
+let yaw = 0, pitch = 0, drag = false, lx = 0, ly = 0;
+canvas.addEventListener('pointerdown', e => { drag = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', e => { if (!drag) return; yaw += (e.clientX - lx) * .006; pitch = Math.max(-.7, Math.min(.7, pitch + (e.clientY - ly) * .006)); lx = e.clientX; ly = e.clientY; });
+canvas.addEventListener('pointerup', () => { drag = false; });
+
+// ---------------- states ------------------------------------------------------------------------------------------
+let state = 'idle', stateUntil = 0, speakEnv = 0, speakUntil = 0, busy = false, listening = false;
+function setState(s, ms){ state = s; stateUntil = ms ? performance.now() + ms : 0;
+  $('stateLbl').textContent = s === 'awaiting' ? 'AWAITING APPROVAL' : s.toUpperCase(); $('stateLbl').classList.toggle('alert', s === 'awaiting');
+  $('coreState').textContent = s === 'awaiting' ? 'Awaiting approval' : s[0].toUpperCase() + s.slice(1); $('coreState').className = s === 'awaiting' ? 'warn' : 'good'; }
+function paintShield(c){ shield.children.forEach(m => m.material.color.setHex(c)); }
+
+// ---------------- slots ---------------------------------------------------------------------------------------------
+const slotsEl = $('slots');
+function renderSlots(){
+  slotsEl.innerHTML = '';
+  for (let i = 0; i < SLOTS; i++) {
+    const p = projects.find(x => x.slot === i), b = document.createElement('button'); b.type = 'button'; b.className = 'slot' + (p ? '' : ' empty');
+    b.innerHTML = p ? `${esc(p.name)}<small>${Object.keys(p.agents).length} agents${p.pending ? ' · ' + p.pending + ' waiting' : ''}</small>` : `+ NAME A PROJECT<small>slot ${String(i + 1).padStart(2, '0')}</small>`;
+    b.onmouseenter = sfx.hover; b.onclick = () => { sfx.open(); p ? openProject(p.id) : openNew(i); };
+    slotsEl.appendChild(b);
+  }
+  layoutSlots(); $('projCount').textContent = projects.length + ' / ' + SLOTS;
+  $('agentCount').textContent = projects.reduce((n, p) => n + Object.keys(p.agents).length, 0);
+}
+function layoutSlots(){ const w = stage.clientWidth, h = stage.clientHeight, cx = w / 2, cy = h / 2, rx = Math.min(w * .4, 360), ry = Math.min(h * .38, 250);
+  [...slotsEl.children].forEach((el, i) => { const a = -Math.PI / 2 + i / SLOTS * Math.PI * 2; el.style.left = (cx + Math.cos(a) * rx) + 'px'; el.style.top = (cy + Math.sin(a) * ry) + 'px'; }); }
+
+// ---------------- modals --------------------------------------------------------------------------------------------
+let modal = null;
+function closeModal(){ if (modal) { modal.remove(); modal = null; [...slotsEl.children].forEach(s => s.classList.remove('active')); } }
+function makeModal(html){ closeModal(); modal = document.createElement('section'); modal.className = 'frame modal'; modal.innerHTML = html + `<button class="tbtn close" type="button" aria-label="Close">CLOSE</button>`;
+  stage.appendChild(modal); modal.querySelector('.close').onclick = () => { sfx.click(); closeModal(); }; return modal; }
+function openProject(id){
+  const p = projects.find(x => x.id === id); if (!p) return; slotsEl.children[p.slot]?.classList.add('active');
+  const c = p.checklist;
+  const m = makeModal(`<div><div class="sub">PROJECT ${String(p.slot + 1).padStart(2, '0')}${p.folder ? ' · ' + esc(p.folder) : ''}</div><h3 id="mTitle"></h3></div>
+    <div class="sub">${esc(p.relevance)}</div>
+    <h2 class="ttl" style="margin:0">Agent modules</h2>
+    <div class="mods">${AGENTS.map(a => `<div class="mod"><span>${a}</span><button type="button" data-a="${a}" class="${p.agents[a] ? 'on' : ''}" aria-pressed="${!!p.agents[a]}">${p.agents[a] ? 'DRAFT-ONLY' : 'OFF'}</button></div>`).join('')}</div>
+    ${c ? `<h2 class="ttl" style="margin:0">Finance: CRA record collection</h2>${c.folder_found ? '' : '<p class="err">Project folder not found on this computer.</p>'}
+      <div>${c.items.map(r => `<div class="check"><span class="w">${esc(r.when)}</span><span>${esc(r.item)}${r.missing && r.missing.length ? `<br><span class="sub">Missing: ${esc(r.missing.join(', '))}</span>` : ''}</span><span class="s ${r.level}">${esc(r.state)}</span></div>`).join('')}</div>
+      <p class="note">Your accountant reviews and files. Sarah prepares and flags what is missing.</p>`
+      : `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>`}
+    <div class="row"><button class="btn ghost" type="button" id="rmBtn">Remove project</button></div>`);
+  decode($('mTitle'), p.name.toUpperCase());
+  m.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => { sfx.click(); await api('POST', `/api/projects/${p.id}/agent`, { agent: b.dataset.a }); await loadProjects(); loadAudit(); openProject(p.id); });
+  $('rmBtn').onclick = async () => { const r = $('rmBtn'); if (!r.dataset.armed) { r.dataset.armed = 1; r.textContent = 'Click again to remove'; sfx.alert(); return; }
+    await api('POST', `/api/projects/${p.id}/delete`, {}); closeModal(); await loadProjects(); loadAudit(); say(`Removed ${p.name}. Its slot is empty again.`); };
+}
+function openNew(slot){
+  slotsEl.children[slot]?.classList.add('active');
+  makeModal(`<div><div class="sub">SLOT ${String(slot + 1).padStart(2, '0')} · EMPTY</div><h3 id="mTitle"></h3></div>
+    <form class="new" id="newForm"><label for="pName">Project name<input id="pName" type="text" placeholder="e.g. APEX Physio" required></label>
+    <label for="pRel">What belongs in this project<textarea id="pRel" placeholder="e.g. Clinic operations, partners, WCB billing, corporate filings" required></textarea></label>
+    <label for="pFolder">Folder on this computer (optional)<input id="pFolder" type="text" placeholder="/Users/adeel/Documents/APEX PHYSIO"></label>
+    <div class="err" id="newErr" hidden></div><div class="row"><button class="btn" type="submit">Create project</button></div></form>
+    <p class="note">One project per slot. Agents start switched off; you turn on the ones this project needs.</p>`);
+  decode($('mTitle'), 'NAME THIS PROJECT'); $('pName').focus();
+  $('newForm').onsubmit = async e => { e.preventDefault(); const err = $('newErr'); err.hidden = true;
+    try { const name = $('pName').value.trim(); await api('POST', '/api/projects', { slot, name, relevance: $('pRel').value.trim(), folder: $('pFolder').value.trim() });
+      sfx.ok(); await loadProjects(); loadAudit(); say(`Project created: ${name}. Its agents are off until you switch them on.`); const p = projects.find(x => x.name === name); if (p) openProject(p.id); }
+    catch (x) { err.textContent = x.message; err.hidden = false; sfx.alert(); } };
+}
+async function openAudit(){
+  const d = await loadAudit();
+  makeModal(`<div><div class="sub">SHIELD</div><h3 id="mTitle"></h3></div><p class="note">Every login, command, draft, approval and setting change, newest first.</p>
+    <div>${d.entries.map(e => `<div class="audit-row"><span>${esc(new Date(e.ts).toLocaleString())}</span><span>${esc(e.actor)}</span><span>${esc(e.action)} ${esc(e.detail === '{}' ? '' : e.detail)}</span></div>`).join('') || '<p class="note">Empty.</p>'}</div>`);
+  decode($('mTitle'), 'AUDIT LOG');
+}
+$('auditBtn').onclick = () => { sfx.open(); openAudit(); };
+async function openSettings(){
+  const v = await loadVault();
+  makeModal(`<div><div class="sub">SHIELD · VAULT</div><h3 id="mTitle"></h3></div>
+    <div class="kv"><span>Vault</span><b>${esc(v.kind)}</b></div>
+    <div class="kv"><span>Brain</span><b class="${v.brain === 'claude' ? 'good' : 'warn'}">${v.brain === 'claude' ? 'Claude (' + esc(v.model) + ')' : 'Local router only'}</b></div>
+    <form class="new" id="keyForm"><label for="ckey">Claude API key${v.names.includes('anthropic_api_key') ? ' (saved; paste a new one to replace it)' : ''}<input id="ckey" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
+    <div class="err" id="keyErr" hidden></div><div class="row"><button class="btn" type="submit">Save to vault</button></div></form>
+    <p class="note">Keys go straight into the vault and are never shown again or sent anywhere except to Claude.</p>`);
+  decode($('mTitle'), 'SETTINGS');
+  $('keyForm').onsubmit = async e => { e.preventDefault(); const err = $('keyErr'); err.hidden = true;
+    try { await api('POST', '/api/vault', { name: 'anthropic_api_key', value: $('ckey').value.trim() }); sfx.ok(); await loadVault(); loadAudit(); closeModal(); say('Key saved to the vault. My full brain is online.'); }
+    catch (x) { err.textContent = x.message; err.hidden = false; sfx.alert(); } };
+}
+$('settingsBtn').onclick = () => { sfx.open(); openSettings(); };
+
+// ---------------- approvals + brief ----------------------------------------------------------------------------------------
+function renderQueue(){
+  const q = $('queue');
+  if (!drafts.length) { q.innerHTML = '<p class="note">No drafts waiting.</p>'; paintShield(CY); $('shieldTag').textContent = 'SHIELD: ACTIVE'; $('shieldTag').className = 'tag ok'; if (state === 'awaiting') setState('idle'); return; }
+  q.innerHTML = drafts.map(d => `<div class="card"><div class="h">DRAFT · ${esc(d.project)} · ${esc(d.agent)}</div><p><b>${esc(d.title)}</b></p><div class="draft-body">${esc(d.body)}</div>
+    <div class="row"><button class="btn amber" type="button" data-ok="${d.id}">Approve</button><button class="btn ghost" type="button" data-no="${d.id}">Reject</button></div></div>`).join('');
+  q.querySelectorAll('[data-ok]').forEach(b => b.onclick = () => decide(b.dataset.ok, 'approve'));
+  q.querySelectorAll('[data-no]').forEach(b => b.onclick = () => decide(b.dataset.no, 'reject'));
+  paintShield(OR); $('shieldTag').textContent = 'SHIELD: APPROVAL NEEDED'; $('shieldTag').className = 'tag warn'; if (state !== 'speaking') setState('awaiting');
+}
+async function decide(id, what){
+  try { const r = await api('POST', `/api/drafts/${id}/${what}`, {}); what === 'approve' ? sfx.ok() : sfx.click();
+    say(what === 'approve' ? 'Approved and logged. Draft-only mode, so nothing was sent.' : 'Rejected and logged.'); }
+  catch (x) { say(x.message); }
+  await Promise.all([loadDrafts(), loadProjects(), loadAudit()]);
+}
+function renderBrief(){
+  const rows = [];
+  projects.forEach(p => {
+    if (p.pending) rows.push([p.name, p.pending + ' waiting for approval', 'warn']);
+    const c = p.checklist; if (c) { const b = c.items[0]; rows.push([p.name + ': bank statements', b.missing && b.missing.length ? 'Missing ' + b.missing.join(', ') : b.state.replace('On file: ', ''), b.missing && b.missing.length ? 'warn' : 'good']);
+      const gaps = c.items.filter(i => i.level !== 'good').length; rows.push([p.name + ': CRA records', gaps + ' to sort out', gaps ? 'warn' : 'good']); }
+  });
+  $('brief').innerHTML = rows.length ? rows.map(r => `<div class="kv"><span>${esc(r[0])}</span><b class="${r[2]}">${esc(r[1])}</b></div>`).join('') : '<p class="note">Nothing needs you right now.</p>';
+}
+
+// ---------------- talk ----------------------------------------------------------------------------------------------------------
+function line(cls, html){ const d = document.createElement('div'); d.className = cls; d.innerHTML = html; $('log').appendChild(d); $('log').scrollTop = 1e9; }
+let voices = []; if ('speechSynthesis' in window) { voices = speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => { voices = speechSynthesis.getVoices(); }; }
+function say(text){
+  line('sa', `<b>SARAH &gt;</b> ${esc(text)}`); speakUntil = performance.now() + Math.min(9000, 600 + text.length * 55); setState('speaking');
+  if (voiceOn && 'speechSynthesis' in window) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text);
+    const v = voices.find(v => /samantha|ava|serena|karen|moira|zira|aria|jenny|female/i.test(v.name) && /^en/i.test(v.lang)); if (v) u.voice = v;
+    u.onend = () => { speakUntil = 0; }; speechSynthesis.speak(u); } catch (e) {} }
+}
+function greet(){ const n = drafts.length; say(`Online. ${projects.length} project${projects.length === 1 ? '' : 's'} connected${n ? `, and ${n} draft${n === 1 ? '' : 's'} waiting for you` : ''}.`); }
+async function send(text){
+  line('me', '&gt; ' + esc(text)); sfx.click(); busy = true; setState('thinking');
+  try { const r = await api('POST', '/api/chat', { text }); busy = false; say(r.reply); }
+  catch (x) { busy = false; say(x.message); }
+  await Promise.all([loadDrafts(), loadProjects(), loadAudit()]).catch(() => {});
+}
+$('cmdForm').onsubmit = e => { e.preventDefault(); const v = $('cmdInput').value.trim(); if (!v || busy) return; $('cmdInput').value = ''; send(v); };
+$('cmdInput').addEventListener('input', () => { if (state === 'idle') setState('listening'); });
+addEventListener('keydown', e => { const t = document.activeElement.tagName; if (e.key === '/' && t !== 'INPUT' && t !== 'TEXTAREA') { e.preventDefault(); $('cmdInput').focus(); } if (e.key === 'Escape') closeModal(); });
+
+// microphone: two-way voice (Chrome / Edge / Safari)
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+if (!SR) { $('micBtn').hidden = true; } else {
+  rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = false;
+  rec.onresult = e => { let t = ''; for (const r of e.results) t += r[0].transcript; $('cmdInput').value = t; if (e.results[e.results.length - 1].isFinal) { $('cmdInput').value = ''; send(t.trim()); } };
+  rec.onend = () => { listening = false; $('micBtn').classList.remove('on'); $('micBtn').setAttribute('aria-pressed', 'false'); if (state === 'listening') setState('idle'); };
+  rec.onerror = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') say('Microphone problem: ' + e.error + '.'); };
+  $('micBtn').onclick = () => { sfx.click(); if (listening) { rec.stop(); return; } try { speechSynthesis && speechSynthesis.cancel(); } catch (e) {}
+    try { rec.start(); listening = true; $('micBtn').classList.add('on'); $('micBtn').setAttribute('aria-pressed', 'true'); setState('listening'); } catch (e) {} };
+}
+
+// ---------------- loop -------------------------------------------------------------------------------------------------------------
+function resize(){ const w = stage.clientWidth, h = stage.clientHeight; R.setSize(w, h, false); cam.aspect = w / h; cam.position.set(0, 1.2, w < 600 ? 15 : 11.5); cam.lookAt(0, 0, 0); cam.updateProjectionMatrix(); layoutSlots(); }
+new ResizeObserver(resize).observe(stage);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let last = performance.now(), T = 0;
+function frame(now){
+  const dt = Math.min(.05, (now - last) / 1000); last = now; T += reduce ? dt * .3 : dt;
+  if (state === 'speaking' && now > speakUntil && !(voiceOn && window.speechSynthesis && speechSynthesis.speaking)) setState(drafts.length ? 'awaiting' : 'idle');
+  if (state === 'listening' && !listening && !$('cmdInput').value) setState('idle');
+  const speed = state === 'thinking' ? 4 : state === 'listening' ? 1.6 : 1;
+  speakEnv += ((state === 'speaking' ? (.35 + .65 * Math.abs(Math.sin(T * 13)) * Math.abs(Math.sin(T * 3.1))) : 0) - speakEnv) * .25;
+  inner.rotation.y += dt * .5 * speed; inner.rotation.x += dt * .2 * speed; innerFill.rotation.copy(inner.rotation);
+  ringA.rotation.z += dt * .4 * speed; ringB.rotation.z -= dt * .25 * speed; tick.rotation.z += dt * .05 * speed; ringC.rotation.z -= dt * .6 * speed; shield.rotation.z += dt * .08;
+  gyro1.rotation.z += dt * .7 * speed; gyro2.rotation.x += dt * .5 * speed;
+  const s = 1 + speakEnv * .18 + Math.sin(T * 1.6) * .02 + (state === 'listening' ? -.05 : 0); inner.scale.setScalar(s); innerFill.scale.setScalar(s);
+  glow.scale.setScalar(7 * (1 + speakEnv * .5)); glow.material.opacity = state === 'awaiting' ? .6 + Math.sin(T * 6) * .3 : .9;
+  for (let i = 0; i < PN; i++) { const d = pd[i]; d.a += d.s * dt * speed; const r = d.r + speakEnv * .4; pp[i * 3] = Math.cos(d.a) * r; pp[i * 3 + 1] = Math.sin(d.a) * r * .35 + d.y; pp[i * 3 + 2] = Math.sin(d.a) * r * .6; }
+  pg.attributes.position.needsUpdate = true;
+  core.rotation.y += ((drag ? yaw : yaw + Math.sin(T * .3) * .25) - core.rotation.y) * .1; core.rotation.x += (pitch - core.rotation.x) * .1;
+  grid.position.z = (T * 1.5) % 2;
+  R.render(scene, cam); requestAnimationFrame(frame);
+}
+setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString([], { hour12: false }); }, 1000);
+resize(); requestAnimationFrame(frame); decode($('logo'), 'SARAH');
+boot().catch(e => { showGate(true); $('gateErr').textContent = 'Sarah Core is not responding. Start it with the Sarah launcher.'; $('gateErr').hidden = false; });
+</script>
+</body>
+</html>

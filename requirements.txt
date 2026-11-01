@@ -2,3 +2,4 @@ vosk
 sounddevice
 claude-agent-sdk
 websockets
+keyring  # optional: Sarah Core stores secrets in the system keychain
