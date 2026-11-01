@@ -570,6 +570,8 @@ return p;};
 def ledger_page():
     html = LEDGER_HTML.read_text(encoding="utf-8", errors="replace")
     shim = LEDGER_SHIM.replace("%LOCAL%", json.dumps(sorted(LEDGER_LOCAL_KEYS)))
+    add = "".join(f'"{n}":"Expense",' for n in invoice_match.NEW_CATEGORIES)
+    html = html.replace('"Store supplies":"Expense",', '"Store supplies":"Expense",' + add, 1)
     i = html.lower().find("<title")
     i = i if i >= 0 else 0
     j = html.lower().rfind("</body>")

@@ -17,6 +17,15 @@ VENDOR_CATEGORY = {  # folder name -> ledger category for matched payments
 }
 # Name found in a bank line -> category (applies to every matching line, e.g. regular store supplies)
 DESC_RULES = {"THREE-ONE": "Store supplies"}
+NEW_CATEGORIES = ["Advertising & promotion", "Meals & entertainment", "Staff gifts & appreciation", "Travel & parking"]   # group: Expense
+# One-off assignments for lines the ledger left as "Possible personal - confirm" (owner: business marketing/staff spend)
+REVIEW_FIXES = [  # (name in bank line, category)
+    ("QAMARIA", "Meals & entertainment"), ("SAMOSAFACTORY", "Meals & entertainment"), ("RAJAFOODS", "Meals & entertainment"),
+    ("GINSOY", "Meals & entertainment"), ("STACKEDPANCAKE", "Meals & entertainment"), ("CORABRENTWOOD", "Meals & entertainment"),
+    ("CALGCO-OPGROCERY", "Meals & entertainment"), ("MACMARKET", "Meals & entertainment"),
+    ("CANADIANROCKIES", "Advertising & promotion"), ("UCALGARYACTIVELIVING", "Staff gifts & appreciation"),
+    ("CGYPARKING", "Travel & parking"), ("CALGARYAIRPORTEXIT", "Travel & parking"),
+]
 DESC_HINT = {"NAYEL": "Pharmacist - Nayel Anwer", "KHARB": "Kharb"}
 TOL = 1.00          # dollars: still a match, but flagged
 WINDOW = (-3, 60)   # payment may be this many days before .. after the invoice date
@@ -184,6 +193,16 @@ def rule_fixes(rows, overrides):
                 k = desc_key(r["date"], r["desc"], r["amount"])
                 if k not in overrides:
                     out[k] = cat
+    for r in rows:
+        if r.get("category") != "Possible personal - confirm":
+            continue
+        s = r.get("desc", "").upper().replace(" ", "")
+        for name, cat in REVIEW_FIXES:
+            if name in s:
+                k = desc_key(r["date"], r["desc"], r["amount"])
+                if k not in overrides:
+                    out[k] = cat
+                break
     return out
 
 
