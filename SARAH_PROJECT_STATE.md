@@ -613,3 +613,9 @@ own port **8770**.
 - OPEN: $25,000 on 2026-10-19 (acct 3218-3951-0743587) is filed as Rent. Owner explains: rent is $4,000/month; owner paid from pocket during new-business period; $25,000 lump sum repays it. Recommended: move to "Repay owner (rent)" transfer and book $4,000/month rent in covered months (guess ~Apr-Oct) — awaiting months + whether rent invoice with GST exists. Accountant should confirm (shareholder loan, GST credits).
 - OPEN: Oct 22 Telus $2,100 vs usual $415 — one-off?
 - Deploy note: TrueNAS app restart pulls code; TrueNAS tab must be signed in.
+
+## 2026-11-01 (later) — owner decisions, CRA GST alignment
+- $25,000 Oct 19 rent lump sum: leave as filed (Rent); accountant will deal with it later. Oct 22 Telus $2,100 = one-time Netcare software update -> Software / Subscriptions. Three-One Distributors invoice exists (owner will drop in One-time/Three-One Distributors). Mastercard import stays ON HOLD.
+- Official CRA filings live in S:\Remedy Pills\Finance\CRA (GST_account_summary/March/July/September CSVs). Standing rule: match ledger against them and highlight discrepancies.
+- GST page aligned to CRA actual refunds (Q1 $2,108.85, Q2 $1,504.17, Q3 $1,730.71) via adjustment lines: Q1 l107 +178.36, Q2 l104 +686.91, Q3 l104 +782.49; Q1-Q3 marked filed (Q1 over-claim $474.61 now rides on Q4). Adjustments are balancing lines with unknown cause — accountant to review. Unexplained deposits: $3,000 (Oct 23) and $693.89 (May 15) from CRA, not on the statements.
+- Agent modules explained to owner (Finance + Coordinator on; Admin, Marketing, Social, HR off); asked which pain to build first and whether a pharmacy sales/dispensing report can be saved to Finance.
