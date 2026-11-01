@@ -844,7 +844,7 @@ from datetime import timedelta
 
 INVOICE_EXT = (".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".png", ".jpg", ".jpeg")
 DEFAULT_VENDORS = [{"name": "Nayel Anwer (pharmacist)", "sender": "nayelanwer@gmail.com",
-                    "cadence": "weekly", "folder": "Pharmacist - Nayel Anwer"}]
+                    "cadence": "weekly", "folder": "Pharmacist - Nayel Anwer", "match": "invoice"}]
 
 
 def invoice_vendors():
@@ -862,33 +862,69 @@ def _safe(name):
     return name[:150] or "file"
 
 
-def _save_attachments(msg, dest):
-    """Save invoice-type attachments. Never overwrites: a different file with the same name gets ' (2)'."""
+def _save_attachments(msg, dest, match=None):
+    """Save invoice-type attachments. Skips identical content already in the folder; never overwrites.
+    match: optional regex the file name must contain (keeps photos/forms from a vendor's address out)."""
     saved = []
     for part in msg.walk():
         fn = part.get_filename()
         if not fn or not fn.lower().endswith(INVOICE_EXT):
             continue
+        if match and not re.search(match, fn, re.I):
+            continue
         data = part.get_payload(decode=True) or b""
         if not data:
             continue
+        digest = hashlib.sha256(data).hexdigest()
         dest.mkdir(parents=True, exist_ok=True)
+        if any(f.is_file() and f.stat().st_size == len(data) and hashlib.sha256(f.read_bytes()).hexdigest() == digest
+               for f in dest.iterdir()):
+            continue
         base = _safe(fn)
         stem, ext = os.path.splitext(base)
         target, n = dest / base, 1
         while target.exists():
-            if target.stat().st_size == len(data):
-                target = None
-                break
             n += 1
             target = dest / f"{stem} ({n}){ext}"
-        if target is None:
-            continue
         tmp = target.with_name(target.name + ".part")
         tmp.write_bytes(data)
         tmp.replace(target)
         saved.append(target.name)
     return saved
+
+
+def tidy_vendor_folders():
+    """Move (never delete) files that do not belong: names failing the vendor's match, and exact duplicates."""
+    moved = []
+    for v in invoice_vendors():
+        d = INVOICE_DIR / _safe(v["folder"])
+        if not d.is_dir():
+            continue
+        seen = {}
+        for f in sorted(d.iterdir(), key=lambda x: x.name):
+            if not f.is_file() or f.name.startswith("_"):
+                continue
+            reason = None
+            if v.get("match") and not re.search(v["match"], f.name, re.I):
+                reason = "_Other"
+            else:
+                h = hashlib.sha256(f.read_bytes()).hexdigest()
+                if h in seen:
+                    reason = "_Duplicates"
+                seen.setdefault(h, f.name)
+            if reason:
+                dest = INVOICE_DIR / reason / _safe(v["folder"])
+                dest.mkdir(parents=True, exist_ok=True)
+                target = dest / f.name
+                k = 1
+                while target.exists():
+                    k += 1
+                    target = dest / f"{f.stem} ({k}){f.suffix}"
+                f.replace(target)
+                moved.append({"file": f.name, "to": reason})
+    if moved:
+        audit("sarah", "invoice_tidy", {"moved": len(moved)})
+    return moved
 
 
 def fetch_invoices(days=None):
@@ -916,7 +952,7 @@ def fetch_invoices(days=None):
 
         for v in vendors:
             for msg in grab(["FROM", f'"{v["sender"]}"', "SINCE", since_s]):
-                for name in _save_attachments(msg, INVOICE_DIR / _safe(v["folder"])):
+                for name in _save_attachments(msg, INVOICE_DIR / _safe(v["folder"]), v.get("match")):
                     result["saved"].append({"vendor": v["name"], "file": name})
         for kw in ("invoice", "statement", "bill"):
             for msg in grab(["SUBJECT", kw, "SINCE", since_s]):
@@ -931,6 +967,7 @@ def fetch_invoices(days=None):
             M.logout()
         except Exception:  # noqa: BLE001
             pass
+    result["tidied"] = tidy_vendor_folders()
     setting("invoice_last_run", now())
     audit("sarah", "invoice_fetch", {"saved": len(result["saved"]), "unknown": len(result["unknown"])})
     if result["unknown"]:
