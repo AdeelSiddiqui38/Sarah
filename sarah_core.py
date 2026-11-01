@@ -559,6 +559,10 @@ document.getElementById('mt-go').onclick=function(){this.textContent='Saving...'
 function open(){fetch('/api/ledger/match',{credentials:'same-origin'}).then(function(x){return x.json();}).then(show).catch(function(){alert('Could not read invoices.');});}
 function add(){var b=document.createElement('button');b.textContent='Match invoices';b.style.cssText='position:fixed;left:10px;bottom:10px;z-index:99990;background:#0f766e;color:#fff;border:0;border-radius:6px;padding:7px 12px;font:12px system-ui;cursor:pointer;opacity:.92';b.onclick=open;document.body.appendChild(b);}
 if(document.body)add();else document.addEventListener('DOMContentLoaded',add);
+var F=window.fetch;window.fetch=function(u,o){var p=F.apply(this,arguments);
+try{if(String(u)==='/api/ledger-data'&&o&&o.method==='POST'&&String(o.body).indexOf('remedy_added_v1')>=0){
+p.then(function(x){if(!x.ok)return;return F('/api/ledger/match',{method:'POST',headers:{'Content-Type':'application/json','X-Sarah':'1'},body:'{}',credentials:'same-origin'}).then(function(y){return y.json();}).then(function(r){if(r&&r.fixes){location.reload();}});}).catch(function(){});}}catch(e){}
+return p;};
 })();</script>"""
 
 

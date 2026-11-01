@@ -24,3 +24,4 @@
 - Lists: small differences, invoices with no payment, vendor payments with no invoice. Matched Nayel/Kharb payments get the right category (never overrides a category you set by hand).
 - Mastercard lines are not matched yet (on hold).
 - API: GET /api/ledger/match (preview), POST /api/ledger/match (save).
+- Automatic: whenever statements are added to the Ledger, Sarah re-runs the match and fixes categories on newly matched payments (the page reloads if anything changed). Review lists stay under the "Match invoices" button.
