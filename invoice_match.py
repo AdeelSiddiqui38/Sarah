@@ -142,11 +142,22 @@ def match(invoices, rows, today=None):
         matches.append({"date": r["date"], "paid": -r["amount"], "desc": r["desc"], "key": desc_key(r["date"], r["desc"], r["amount"]),
                         "category": r.get("category"), "vendor": inv["vendor"], "file": inv["file"], "invoice": inv["total"],
                         "invoice_date": inv["date"], "diff": round(-r["amount"] - inv["total"], 2)})
-    unpaid = [inv for i, inv in enumerate(invoices) if i not in used_i and (today - dt.date.fromisoformat(inv["date"])).days > 14]
+    # Owner rule: every Nayel payment is against a valid invoice even when the invoice email is gone,
+    # so old unmatched Nayel invoices / unmatched Nayel payments are not problems (recent invoices still are).
+    def old_nayel(inv):
+        return inv["vendor"] == "Pharmacist - Nayel Anwer" and (today - dt.date.fromisoformat(inv["date"])).days > 30
+    unpaid = [inv for i, inv in enumerate(invoices) if i not in used_i and (today - dt.date.fromisoformat(inv["date"])).days > 14 and not old_nayel(inv)]
     # payments that look like vendor payments but have no invoice
     names = tuple(DESC_HINT)
+    def other_name(desc):
+        tail = re.split(r"SENT", desc.upper().replace(" ", ""), maxsplit=1)[-1]
+        tail = re.sub(r"\d.*$", "", tail)
+        return bool(re.search(r"[A-Z]{3}", tail)) and "NAYEL" not in tail
+
+    def accepted(r):  # unnamed or Nayel e-transfer filed as Nayel wages
+        return r.get("category", "").startswith("Wages - Nayel") and not other_name(r["desc"])
     nomatch = [{"date": r["date"], "paid": -r["amount"], "desc": r["desc"], "category": r.get("category")}
-               for j, r in enumerate(pays) if j not in used_j and (r.get("category", "").startswith(("Wages - Nayel", "Delivery - Kharb")) or any(n in r["desc"].upper() for n in names))]
+               for j, r in enumerate(pays) if j not in used_j and not accepted(r) and (r.get("category", "").startswith(("Wages - Nayel", "Delivery - Kharb")) or any(n in r["desc"].upper() for n in names))]
     return {"matches": sorted(matches, key=lambda m: m["date"]), "unpaid": sorted(unpaid, key=lambda m: m["date"]),
             "no_invoice": sorted(nomatch, key=lambda m: m["date"])}
 
