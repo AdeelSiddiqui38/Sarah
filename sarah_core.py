@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import invoice_match
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "sarah.db"
@@ -492,6 +494,32 @@ def ledger_write(data):
         pass
 
 
+def ledger_match(apply=False):
+    """Match sent e-transfers to invoices (bank line = the expense, counted once). apply=True also fixes categories."""
+    invoices, unread = invoice_match.scan_invoices(INVOICE_DIR)
+    with _ledger_lock:
+        data = ledger_read()
+        try:
+            added = json.loads(data.get("remedy_added_v1") or "[]")
+            over = json.loads(data.get("remedy_over_v1") or "{}")
+        except ValueError:
+            added, over = [], {}
+        rows = invoice_match.seed_rows(LEDGER_HTML) + added
+        res = invoice_match.match(invoices, rows)
+        fixes = invoice_match.category_fixes(res, over)
+        res["fixes"] = len(fixes)
+        res["invoices"] = len(invoices)
+        res["unreadable"] = unread
+        res["mastercard"] = "on hold"
+        if apply:
+            over.update(fixes)
+            data["remedy_over_v1"] = json.dumps(over)
+            data["remedy_match_v1"] = json.dumps({"at": datetime.now(timezone.utc).isoformat(), **{k: res[k] for k in ("matches", "unpaid", "no_invoice")}})
+            ledger_write(data)
+            audit("adeel", "ledger_match_apply", {"matched": len(res["matches"]), "fixed": len(fixes)})
+    return res
+
+
 LEDGER_SHIM = """<script>(function(){
 var X=new XMLHttpRequest();X.open('GET','/api/ledger-data',false);X.send();
 var D={};try{D=JSON.parse(X.responseText).data||{};}catch(e){}
@@ -510,12 +538,38 @@ window.addEventListener('beforeunload',function(){if(q.length)flush();});
 })();</script>"""
 
 
+LEDGER_MATCH_UI = """<script>(function(){
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+function money(n){return '$'+Number(n).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function sec(t,rows){return rows.length?'<h4 style="margin:14px 0 4px">'+t+' ('+rows.length+')</h4><table style="width:100%;border-collapse:collapse;font-size:12px">'+rows.join('')+'</table>':'';}
+function tr(c){return '<tr>'+c.map(function(x){return '<td style="padding:3px 6px;border-bottom:1px solid #8883">'+x+'</td>';}).join('')+'</tr>';}
+function show(r){var o=document.getElementById('mt-ov');if(o)o.remove();o=document.createElement('div');o.id='mt-ov';
+o.style.cssText='position:fixed;inset:0;background:#0007;z-index:99998;display:flex;align-items:center;justify-content:center;font:13px system-ui';
+var flagged=r.matches.filter(function(m){return Math.abs(m.diff)>0.004;}),exact=r.matches.length-flagged.length;
+var h='<div style="background:#fff;color:#111;max-width:760px;width:94%;max-height:86vh;overflow:auto;border-radius:10px;padding:18px 20px"><div style="display:flex;justify-content:space-between"><b style="font-size:16px">Invoices matched to payments</b><button id="mt-x" style="border:0;background:none;font-size:18px;cursor:pointer">x</button></div>'
++'<p style="margin:6px 0">'+r.invoices+' invoices read. <b>'+exact+'</b> matched exactly, <b>'+flagged.length+'</b> matched with a small difference. Each bank payment is counted once (the bank line is the expense; the invoice is its record). Mastercard is on hold.</p>'
++sec('Small differences - check',flagged.map(function(m){return tr([m.date,esc(m.vendor),money(m.paid)+' paid',money(m.invoice)+' invoiced',(m.diff>0?'+':'')+m.diff.toFixed(2)]);}))
++sec('Invoices with no payment found',r.unpaid.map(function(u){return tr([u.date,esc(u.vendor),esc(u.file),money(u.total)]);}))
++sec('Vendor payments with no invoice',r.no_invoice.map(function(u){return tr([u.date,money(u.paid),esc(u.desc.slice(0,48)),esc(u.category||'')]);}))
++(r.unreadable.length?'<p style="color:#777">'+r.unreadable.length+' file(s) could not be read for a total and were skipped.</p>':'')
++'<div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button id="mt-go" style="background:#0f766e;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer">'+(r.fixes?'Fix '+r.fixes+' category(ies) and save':'Save results')+'</button><button id="mt-c" style="padding:8px 14px;border-radius:6px;border:1px solid #888;background:#fff;cursor:pointer">Close</button></div></div>';
+o.innerHTML=h;document.body.appendChild(o);
+function close(){o.remove();}document.getElementById('mt-x').onclick=close;document.getElementById('mt-c').onclick=close;
+document.getElementById('mt-go').onclick=function(){this.textContent='Saving...';fetch('/api/ledger/match',{method:'POST',headers:{'Content-Type':'application/json','X-Sarah':'1'},body:'{}',credentials:'same-origin'}).then(function(x){if(!x.ok)throw 0;location.reload();}).catch(function(){alert('Could not save.');});};}
+function open(){fetch('/api/ledger/match',{credentials:'same-origin'}).then(function(x){return x.json();}).then(show).catch(function(){alert('Could not read invoices.');});}
+function add(){var b=document.createElement('button');b.textContent='Match invoices';b.style.cssText='position:fixed;left:10px;bottom:10px;z-index:99990;background:#0f766e;color:#fff;border:0;border-radius:6px;padding:7px 12px;font:12px system-ui;cursor:pointer;opacity:.92';b.onclick=open;document.body.appendChild(b);}
+if(document.body)add();else document.addEventListener('DOMContentLoaded',add);
+})();</script>"""
+
+
 def ledger_page():
     html = LEDGER_HTML.read_text(encoding="utf-8", errors="replace")
     shim = LEDGER_SHIM.replace("%LOCAL%", json.dumps(sorted(LEDGER_LOCAL_KEYS)))
     i = html.lower().find("<title")
     i = i if i >= 0 else 0
-    return (html[:i] + shim + html[i:]).encode("utf-8")
+    j = html.lower().rfind("</body>")
+    j = j if j >= 0 else len(html)
+    return (html[:i] + shim + html[i:j] + LEDGER_MATCH_UI + html[j:]).encode("utf-8")
 
 
 # ----------------------------------------------------------------------- server
@@ -606,6 +660,8 @@ class H(BaseHTTPRequestHandler):
                                             "gmail": bool(vault_get("gmail_app_password"))}})
         if path == "/api/invoices":
             return self.send(200, invoice_status())
+        if path == "/api/ledger/match":
+            return self.send(200, ledger_match())
         return self.send(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -638,6 +694,13 @@ class H(BaseHTTPRequestHandler):
                     return self.send(500, {"error": "Could not write the ledger data to the NAS."})
             audit("adeel", "ledger_save", {"keys": sorted(list(sets) + rms)})
             return self.send(200, {"ok": True})
+        if path == "/api/ledger/match":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            try:
+                return self.send(200, ledger_match(apply=True))
+            except OSError:
+                return self.send(500, {"error": "Could not write the ledger data to the NAS."})
         if path == "/api/setup":
             if setting("pass_hash"):
                 return self.send(409, {"error": "Already set up."})
