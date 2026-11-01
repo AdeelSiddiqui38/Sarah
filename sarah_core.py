@@ -843,8 +843,49 @@ import imaplib
 from datetime import timedelta
 
 INVOICE_EXT = (".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".png", ".jpg", ".jpeg")
-DEFAULT_VENDORS = [{"name": "Nayel Anwer (pharmacist)", "sender": "nayelanwer@gmail.com",
-                    "cadence": "weekly", "folder": "Pharmacist - Nayel Anwer", "match": "invoice"}]
+DEFAULT_VENDORS = [
+    {"name": "Nayel Anwer (pharmacist)", "sender": "nayelanwer@gmail.com", "cadence": "weekly",
+     "folder": "Pharmacist - Nayel Anwer", "match": "invoice"},
+    {"name": "Kharb", "sender": "info@kharb.ca", "cadence": "monthly", "folder": "Kharb"},
+    {"name": "Pharma Planet Labs", "sender": "donotreply@app.helcim.com", "cadence": "once", "folder": "One-time/Pharma Planet Labs"},
+    {"name": "Pharmaris", "sender": "accounting@pharmaris.com", "cadence": "once", "folder": "One-time/Pharmaris"},
+    {"name": "fordbi (Shaw)", "sender": "fordbi@shaw.ca", "cadence": "once", "folder": "One-time/fordbi (Shaw)"},
+    {"name": "Sharath Velagandula", "sender": "velagandula.sharath@gmail.com", "cadence": "once", "folder": "One-time/Sharath Velagandula"},
+    {"name": "a.sid38 (Hotmail)", "sender": "a.sid38@hotmail.com", "cadence": "once", "folder": "One-time/a.sid38 (Hotmail)"},
+]
+
+
+def vdir(v):
+    """Vendor folder under INVOICE_DIR; 'One-time/Name' makes a subfolder."""
+    d = INVOICE_DIR
+    for part in str(v["folder"]).split("/"):
+        d = d / _safe(part)
+    return d
+
+
+def migrate_inbox():
+    """Move files parked in _Inbox/<sender> into that sender's vendor folder once it is a known vendor."""
+    moved = 0
+    for v in invoice_vendors():
+        src = INVOICE_DIR / "_Inbox" / _safe(v["sender"].lower())
+        if not src.is_dir():
+            continue
+        dest = vdir(v)
+        for f in src.iterdir():
+            if not f.is_file():
+                continue
+            dest.mkdir(parents=True, exist_ok=True)
+            target, k = dest / f.name, 1
+            while target.exists():
+                k += 1
+                target = dest / f"{f.stem} ({k}){f.suffix}"
+            f.replace(target)
+            moved += 1
+        try:
+            src.rmdir()
+        except OSError:
+            pass
+    return moved
 
 
 def invoice_vendors():
@@ -897,7 +938,7 @@ def tidy_vendor_folders():
     """Move (never delete) files that do not belong: names failing the vendor's match, and exact duplicates."""
     moved = []
     for v in invoice_vendors():
-        d = INVOICE_DIR / _safe(v["folder"])
+        d = vdir(v)
         if not d.is_dir():
             continue
         seen = {}
@@ -913,7 +954,7 @@ def tidy_vendor_folders():
                     reason = "_Duplicates"
                 seen.setdefault(h, f.name)
             if reason:
-                dest = INVOICE_DIR / reason / _safe(v["folder"])
+                dest = INVOICE_DIR / reason / _safe(str(v["folder"]).replace("/", " - "))
                 dest.mkdir(parents=True, exist_ok=True)
                 target = dest / f.name
                 k = 1
@@ -952,7 +993,7 @@ def fetch_invoices(days=None):
 
         for v in vendors:
             for msg in grab(["FROM", f'"{v["sender"]}"', "SINCE", since_s]):
-                for name in _save_attachments(msg, INVOICE_DIR / _safe(v["folder"]), v.get("match")):
+                for name in _save_attachments(msg, vdir(v), v.get("match")):
                     result["saved"].append({"vendor": v["name"], "file": name})
         for kw in ("invoice", "statement", "bill"):
             for msg in grab(["SUBJECT", kw, "SINCE", since_s]):
@@ -968,6 +1009,7 @@ def fetch_invoices(days=None):
         except Exception:  # noqa: BLE001
             pass
     result["tidied"] = tidy_vendor_folders()
+    result["filed_from_inbox"] = migrate_inbox()
     setting("invoice_last_run", now())
     audit("sarah", "invoice_fetch", {"saved": len(result["saved"]), "unknown": len(result["unknown"])})
     if result["unknown"]:
@@ -988,7 +1030,7 @@ def invoice_status():
     out = {"gmail": GMAIL_USER, "connected": bool(vault_get("gmail_app_password")),
            "last_run": setting("invoice_last_run"), "vendors": []}
     for v in invoice_vendors():
-        d = INVOICE_DIR / _safe(v["folder"])
+        d = vdir(v)
         try:
             files = [f for f in d.iterdir() if f.is_file() and not f.name.startswith("_")]
         except OSError:
