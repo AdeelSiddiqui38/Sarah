@@ -134,7 +134,6 @@ body { margin: 0; }
     <span class="tag warn">DRAFT-ONLY MODE</span>
     <span class="tag ok" id="shieldTag">SHIELD: ACTIVE</span>
     <span class="spacer"></span>
-    <a class="tbtn" id="ledgerBtn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">LEDGER</a>
     <button class="tbtn" type="button" id="settingsBtn">SETTINGS</button>
     <button class="tbtn" type="button" id="soundBtn" aria-pressed="true">SOUND ON</button>
     <button class="tbtn" type="button" id="voiceBtn" aria-pressed="false">VOICE OFF</button>
@@ -351,6 +350,7 @@ function openProject(id){
       <div>${c.items.map(r => `<div class="check"><span class="w">${esc(r.when)}</span><span>${esc(r.item)}${r.missing && r.missing.length ? `<br><span class="sub">Missing: ${esc(r.missing.join(', '))}</span>` : ''}</span><span class="s ${r.level}">${esc(r.state)}</span></div>`).join('')}</div>
       <p class="note">Your accountant reviews and files. Sarah prepares and flags what is missing.</p>`
       : `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>`}
+    ${p.agents.Finance ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">Open ledger</a></div>` : ''}
     <div class="row"><button class="btn ghost" type="button" id="rmBtn">Remove project</button></div>`);
   decode($('mTitle'), p.name.toUpperCase());
   m.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => { sfx.click(); await api('POST', `/api/projects/${p.id}/agent`, { agent: b.dataset.a }); await loadProjects(); loadAudit(); openProject(p.id); });
