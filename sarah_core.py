@@ -139,7 +139,17 @@ except Exception:  # noqa: BLE001
 VAULT_FILE = DATA_DIR / "vault.json"
 
 
-def vault_get(name):
+# The AI "brain" keys are shared by every project. Everything else (mail, website, bank, social logins) belongs to ONE project.
+# Slot 0 (Remedy Pills) keeps the original un-prefixed names so nothing already saved has to move.
+SHARED_SECRETS = ("anthropic_api_key", "openai_api_key")
+
+
+def vault_key(name, slot=0):
+    return name if (name in SHARED_SECRETS or not slot) else f"p{int(slot)}:{name}"
+
+
+def vault_get(name, slot=0):
+    name = vault_key(name, slot)
     if keyring:
         return keyring.get_password("sarah-core", name)
     try:
@@ -148,7 +158,8 @@ def vault_get(name):
         return None
 
 
-def vault_set(name, value):
+def vault_set(name, value, slot=0):
+    name = vault_key(name, slot)
     if keyring:
         keyring.set_password("sarah-core", name, value)
         names = set(json.loads(setting("vault_names") or "[]")) | {name}
@@ -846,26 +857,30 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"ok": True, "note": "Draft-only mode: recorded, nothing was sent."})
         if path == "/api/vault":
             name, value = str(b.get("name", "")), str(b.get("value", ""))
+            _vp = find_project(str(b.get("project") or "Remedy Pills"))
+            if not _vp:
+                return self.send(404, {"error": "No such project."})
+            vslot = _vp["slot"]
             if name == "gmail_app_password":
                 value = re.sub(r"\s+", "", value)
                 if not re.fullmatch(r"[a-z]{16}", value):
                     return self.send(400, {"error": "A Google app password is 16 letters (spaces are fine)."})
-                vault_set(name, value)
-                audit("adeel", "vault_set", {"name": name})
+                vault_set(name, value, vslot)
+                audit("adeel", "vault_set", {"name": name, "project": _vp["name"]})
                 return self.send(200, {"ok": True})
             if name == "wp_user":
                 value = value.strip()
                 if not re.fullmatch(r"[\w .@-]{2,60}", value):
                     return self.send(400, {"error": "Enter the WordPress username (for example Sarah-editor)."})
-                vault_set(name, value)
-                audit("adeel", "vault_set", {"name": name})
+                vault_set(name, value, vslot)
+                audit("adeel", "vault_set", {"name": name, "project": _vp["name"]})
                 return self.send(200, {"ok": True})
             if name == "wp_app_password":
                 value = re.sub(r"\s+", "", value)
                 if not re.fullmatch(r"[A-Za-z0-9]{24}", value):
                     return self.send(400, {"error": "A WordPress application password is 24 letters and numbers (spaces are fine)."})
-                vault_set(name, value)
-                audit("adeel", "vault_set", {"name": name})
+                vault_set(name, value, vslot)
+                audit("adeel", "vault_set", {"name": name, "project": _vp["name"]})
                 return self.send(200, {"ok": True})
             if name not in ("anthropic_api_key", "openai_api_key") or len(value) < 20:
                 return self.send(400, {"error": "Paste a valid key."})
