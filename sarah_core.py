@@ -33,6 +33,7 @@ from pathlib import Path
 import invoice_match
 import wp_tools
 import marketing_agent
+import social_agent
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -775,6 +776,13 @@ class H(BaseHTTPRequestHandler):
             q("INSERT INTO projects (slot,name,relevance,folder,agents,created) VALUES (?,?,?,?,?,?)", (slot, name, rel, folder, "{}", now()))
             audit("adeel", "project_created", {"name": name, "slot": slot + 1, "relevance": rel})
             return self.send(200, {"ok": True})
+        if path == "/api/social/run":
+            p = find_project(str(b.get("project") or "Remedy Pills"))
+            if not p:
+                return self.send(404, {"error": "No such project."})
+            if not p["agents"].get("Social media"):
+                return self.send(400, {"error": "The Social media agent is off for this project. Switch it on first."})
+            return self.send(200, run_social(p, actor="adeel"))
         if path == "/api/marketing/run":
             p = find_project(str(b.get("project") or "Remedy Pills"))
             if not p:
@@ -1282,6 +1290,40 @@ def marketing_job():
             run_marketing(p)
 
 
+# ------------------------------------------------------- Social media agent (draft-only)
+def run_social(p, actor="sarah"):
+    """Prepare this week's Facebook / Instagram / Nextdoor posts as ONE draft. Nothing is posted."""
+    today = datetime.now()
+    week_no = today.isocalendar()[1]
+    pillar = social_agent.pick_pillar(week_no)
+    end = setting("mkt_offer_end")
+    if pillar == "offer" and not social_agent.offer_active(end):
+        pillar = "service"
+    label, posts, flags = social_agent.build_posts(pillar, today, social_agent.pick_service(week_no))
+    body = social_agent.build_brief(pillar, label, posts, flags, setting("gbp_posting") != "ok", today)
+    week = today - timedelta(days=today.weekday())
+    title = f"Weekly social drafts, week of {week.strftime('%b %d')}"
+    if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+        return {"ok": True, "note": "This week's social drafts are already waiting for approval."}
+    did = make_draft(p, "Social media", title, body, actor=actor)
+    audit(actor, "social_drafts", {"project": p["name"], "draft": did, "topic": label, "flags": flags})
+    return {"ok": True, "draft": did, "topic": label, "flags": flags}
+
+
+def social_job():
+    """Monday: one set of social drafts per project whose Social media agent is on (built for Remedy Pills)."""
+    today = datetime.now()
+    if today.weekday() != 0:
+        return
+    key = f"social_drafts_{today.isocalendar()[0]}-W{today.isocalendar()[1]:02d}"
+    if setting(key):
+        return
+    setting(key, now())
+    for p in list_projects():
+        if p["agents"].get("Social media") and "remedy" in p["name"].lower():
+            run_social(p)
+
+
 def _task_loop():
     while True:
         try:
@@ -1296,6 +1338,10 @@ def _task_loop():
             marketing_job()
         except Exception as e:  # noqa: BLE001
             print("marketing task error:", e, flush=True)
+        try:
+            social_job()
+        except Exception as e:  # noqa: BLE001
+            print("social task error:", e, flush=True)
         try:
             monthly_statements_task()
         except Exception as e:  # noqa: BLE001
