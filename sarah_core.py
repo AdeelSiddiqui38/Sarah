@@ -31,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import invoice_match
+import wp_tools
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -668,6 +669,22 @@ class H(BaseHTTPRequestHandler):
                                             "wp": bool(vault_get("wp_app_password") and vault_get("wp_user"))}})
         if path == "/api/invoices":
             return self.send(200, invoice_status())
+        if path == "/api/wp/test":
+            u, p = vault_get("wp_user"), vault_get("wp_app_password")
+            if not (u and p):
+                return self.send(400, {"error": "WordPress login is not in the vault yet."})
+            return self.send(200, wp_tools.test(u, p))
+        if path == "/api/wp/backup":
+            u, p = vault_get("wp_user"), vault_get("wp_app_password")
+            if not (u and p):
+                return self.send(400, {"error": "WordPress login is not in the vault yet."})
+            dest = DOCS / "Remedy Pills" / "Branding & Marketing" / "Website" / "backup" / datetime.now().strftime("%Y-%m-%d_%H%M")
+            try:
+                counts = wp_tools.backup(u, p, dest)
+            except OSError as e:
+                return self.send(500, {"error": "Could not write the backup: " + str(e)[:120]})
+            audit("sarah", "wp_backup", {"dest": str(dest), **counts})
+            return self.send(200, {"ok": True, "folder": str(dest), **counts})
         if path == "/api/ledger/match":
             return self.send(200, ledger_match())
         return self.send(404, {"error": "Not found"})
