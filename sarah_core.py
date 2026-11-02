@@ -678,7 +678,7 @@ class H(BaseHTTPRequestHandler):
             u, p = vault_get("wp_user"), vault_get("wp_app_password")
             if not (u and p):
                 return self.send(400, {"error": "WordPress login is not in the vault yet."})
-            dest = DOCS / "Remedy Pills" / "Branding & Marketing" / "Website" / "backup" / datetime.now().strftime("%Y-%m-%d_%H%M")
+            dest = DATA_DIR / "website-backup" / datetime.now().strftime("%Y-%m-%d_%H%M")   # Branding & Marketing is read-only to Sarah; DATA_DIR is the SARAH share
             try:
                 counts = wp_tools.backup(u, p, dest)
             except OSError as e:
