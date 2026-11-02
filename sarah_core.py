@@ -664,7 +664,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"kind": VAULT_KIND, "names": vault_names(), "model": active_model(),
                                    "brain": brain_provider(),
                                    "have": {"claude": bool(vault_get("anthropic_api_key")), "openai": bool(vault_get("openai_api_key")),
-                                            "gmail": bool(vault_get("gmail_app_password"))}})
+                                            "gmail": bool(vault_get("gmail_app_password")),
+                                            "wp": bool(vault_get("wp_app_password") and vault_get("wp_user"))}})
         if path == "/api/invoices":
             return self.send(200, invoice_status())
         if path == "/api/ledger/match":
@@ -785,6 +786,20 @@ class H(BaseHTTPRequestHandler):
                 value = re.sub(r"\s+", "", value)
                 if not re.fullmatch(r"[a-z]{16}", value):
                     return self.send(400, {"error": "A Google app password is 16 letters (spaces are fine)."})
+                vault_set(name, value)
+                audit("adeel", "vault_set", {"name": name})
+                return self.send(200, {"ok": True})
+            if name == "wp_user":
+                value = value.strip()
+                if not re.fullmatch(r"[\w .@-]{2,60}", value):
+                    return self.send(400, {"error": "Enter the WordPress username (for example Sarah-editor)."})
+                vault_set(name, value)
+                audit("adeel", "vault_set", {"name": name})
+                return self.send(200, {"ok": True})
+            if name == "wp_app_password":
+                value = re.sub(r"\s+", "", value)
+                if not re.fullmatch(r"[A-Za-z0-9]{24}", value):
+                    return self.send(400, {"error": "A WordPress application password is 24 letters and numbers (spaces are fine)."})
                 vault_set(name, value)
                 audit("adeel", "vault_set", {"name": name})
                 return self.send(200, {"ok": True})

@@ -384,7 +384,7 @@ async function openSettings(){
     <div class="kv"><span>Vault</span><b>${esc(v.kind)}</b></div>
     <div class="kv"><span>Brain</span><b class="${v.brain !== 'local' ? 'good' : 'warn'}">${v.brain === 'local' ? 'Local router only' : (v.brain === 'openai' ? 'OpenAI' : 'Claude') + ' (' + esc(v.model) + ')'}</b></div>
     ${v.have.claude && v.have.openai ? `<div class="row"><button class="btn" id="useOpenai" type="button">Use OpenAI</button><button class="btn" id="useClaude" type="button">Use Claude</button></div>` : ''}
-    <form class="new" id="keyForm"><label for="pkind">Provider<select id="pkind"><option value="openai_api_key">OpenAI${v.have.openai ? ' (saved)' : ''}</option><option value="anthropic_api_key">Claude${v.have.claude ? ' (saved)' : ''}</option><option value="gmail_app_password">Gmail app password (pharmacy invoices)${v.have.gmail ? ' (saved)' : ''}</option></select></label>
+    <form class="new" id="keyForm"><label for="pkind">Provider<select id="pkind"><option value="openai_api_key">OpenAI${v.have.openai ? ' (saved)' : ''}</option><option value="anthropic_api_key">Claude${v.have.claude ? ' (saved)' : ''}</option><option value="gmail_app_password">Gmail app password (pharmacy invoices)${v.have.gmail ? ' (saved)' : ''}</option><option value="wp_user">WordPress username (remedypills.ca)</option><option value="wp_app_password">WordPress application password (remedypills.ca)${v.have.wp ? ' (saved)' : ''}</option></select></label>
     <label for="ckey">API key (paste a new one to replace a saved one)<input id="ckey" type="password" autocomplete="off" placeholder="sk-..."></label>
     <div class="err" id="keyErr" hidden></div><div class="row"><button class="btn" type="submit">Save to vault</button>${v.have.gmail ? '<button class="btn" id="fetchInv" type="button">Fetch invoices now</button>' : ''}</div></form>
     <p class="note">Keys go straight into the vault and are never shown again or sent anywhere except to the provider you choose.</p>`);
@@ -392,7 +392,7 @@ async function openSettings(){
   if ($('fetchInv')) $('fetchInv').onclick = async () => { const b = $('fetchInv'); b.disabled = true; b.textContent = 'Fetching...'; try { const r = await api('POST', '/api/invoices/run', {}); sfx.ok(); loadAudit(); closeModal(); say('Invoices checked: ' + r.saved.length + ' new file(s), ' + r.unknown.length + ' from unknown senders.'); } catch (x) { sfx.alert(); b.disabled = false; b.textContent = 'Fetch invoices now'; $('keyErr').textContent = x.message; $('keyErr').hidden = false; } };
   decode($('mTitle'), 'SETTINGS');
   $('keyForm').onsubmit = async e => { e.preventDefault(); const err = $('keyErr'); err.hidden = true;
-    try { const kind = $('pkind').value; await api('POST', '/api/vault', { name: kind, value: $('ckey').value.trim() }); sfx.ok(); await loadVault(); loadAudit(); closeModal(); say(kind === 'gmail_app_password' ? 'Gmail password saved. I can fetch invoices now.' : 'Key saved to the vault. My full brain is online.'); }
+    try { const kind = $('pkind').value; await api('POST', '/api/vault', { name: kind, value: $('ckey').value.trim() }); sfx.ok(); await loadVault(); loadAudit(); closeModal(); say(kind === 'gmail_app_password' ? 'Gmail password saved. I can fetch invoices now.' : kind.startsWith('wp_') ? 'WordPress detail saved to the vault.' : 'Key saved to the vault. My full brain is online.'); }
     catch (x) { err.textContent = x.message; err.hidden = false; sfx.alert(); } };
 }
 $('settingsBtn').onclick = () => { sfx.open(); openSettings(); };
