@@ -39,6 +39,7 @@ DB_PATH = DATA_DIR / "sarah.db"
 UI_FILE = BASE_DIR / "sarah-grid.html"
 LEDGER_DIR = Path(os.environ.get("SARAH_LEDGER_DIR", DATA_DIR / "ledger"))   # on the NAS: the Finance/Accounts folder on S:
 LEDGER_DATA = LEDGER_DIR / "ledger-data.json"
+WEBSITE_DIR = Path(os.environ.get("SARAH_WEBSITE_DIR", DATA_DIR / "website"))   # on the NAS: Remedy Pills/Branding & Marketing/Website on S:
 INVOICE_DIR = Path(os.environ.get("SARAH_INVOICE_DIR", DATA_DIR / "invoices"))   # on the NAS: Remedy Pills/Finance/Invoices on S:
 GMAIL_USER = os.environ.get("SARAH_GMAIL_USER", "remedypillspharmacy@gmail.com")
 LEDGER_HTML = Path(os.environ.get("SARAH_LEDGER_HTML", str(Path(os.environ.get("SARAH_PROJECTS_ROOT", Path.home() / "Documents")) / "Remedy Pills" / "Finance" / "Accounts" / "Remedy_Ledger_Main.html")))
@@ -678,7 +679,7 @@ class H(BaseHTTPRequestHandler):
             u, p = vault_get("wp_user"), vault_get("wp_app_password")
             if not (u and p):
                 return self.send(400, {"error": "WordPress login is not in the vault yet."})
-            dest = DATA_DIR / "website-backup" / datetime.now().strftime("%Y-%m-%d_%H%M")   # Branding & Marketing is read-only to Sarah; DATA_DIR is the SARAH share
+            dest = WEBSITE_DIR / "backup" / datetime.now().strftime("%Y-%m-%d_%H%M")
             try:
                 counts = wp_tools.backup(u, p, dest)
             except OSError as e:

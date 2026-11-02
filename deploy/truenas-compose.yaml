@@ -36,6 +36,7 @@ services:
       SARAH_PROJECTS_ROOT: /projects
       SARAH_LEDGER_DIR: /ledger-data
       SARAH_INVOICE_DIR: /invoices
+      SARAH_WEBSITE_DIR: /website
       SARAH_ORIGINS: https://sarah.TAILNET.ts.net
       SARAH_ALLOWED_USERS: YOUR_TAILSCALE_LOGIN
       SARAH_SECURE_COOKIE: "1"
@@ -47,6 +48,8 @@ services:
       - "/mnt/POOL/sarah/projects/Remedy Pills/Finance/Accounts:/ledger-data"
       # second writable spot: invoices Sarah pulls from Gmail (read-only mailbox access)
       - "/mnt/POOL/sarah/projects/Remedy Pills/Finance/Invoices:/invoices"
+      # third writable spot: website backups and drafts (Marketing agent)
+      - "/mnt/POOL/sarah/projects/Remedy Pills/Branding & Marketing/Website:/website"
     command: >
       sh -c "apk add --no-cache git >/dev/null &&
              (git -C /app pull --ff-only || git clone --depth 1 https://github.com/AdeelSiddiqui38/Sarah /app) &&
