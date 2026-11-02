@@ -810,11 +810,16 @@ class H(BaseHTTPRequestHandler):
                 setting("mkt_open_items", json.dumps([str(i)[:200] for i in b["open_items"]][:30]))
             audit("adeel", "marketing_settings", {k: b[k] for k in ("google_posting", "offer_end") if k in b})
             return self.send(200, {"ok": True})
-        m = re.fullmatch(r"/api/projects/(\d+)/(agent|delete)", path)
+        m = re.fullmatch(r"/api/projects/(\d+)/(agent|delete|folder)", path)
         if m:
             p = q("SELECT * FROM projects WHERE id=?", (int(m.group(1)),), one=True)
             if not p:
                 return self.send(404, {"error": "No such project."})
+            if m.group(2) == "folder":
+                folder = str(b.get("folder", "")).strip() or None
+                q("UPDATE projects SET folder=? WHERE id=?", (folder, p["id"]))
+                audit("adeel", "project_folder_changed", {"name": p["name"], "folder": folder})
+                return self.send(200, {"ok": True, "folder": folder})
             if m.group(2) == "delete":
                 q("DELETE FROM projects WHERE id=?", (p["id"],))
                 audit("adeel", "project_removed", {"name": p["name"]})
