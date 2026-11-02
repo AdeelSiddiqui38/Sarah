@@ -350,7 +350,7 @@ function openProject(id){
       <div>${c.items.map(r => `<div class="check"><span class="w">${esc(r.when)}</span><span>${esc(r.item)}${r.missing && r.missing.length ? `<br><span class="sub">Missing: ${esc(r.missing.join(', '))}</span>` : ''}</span><span class="s ${r.level}">${esc(r.state)}</span></div>`).join('')}</div>
       <p class="note">Your accountant reviews and files. Sarah prepares and flags what is missing.</p>`
       : `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>`}
-    ${p.agents.Finance ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">Open ledger</a></div>` : ''}
+    ${p.agents.Finance && /remedy/i.test(p.name) ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">Open ledger</a></div>` : ''}
     <form class="new" id="folderForm"><label for="pFolderEdit">Project folder (path on the NAS)<input id="pFolderEdit" type="text" value="${esc(p.folder || '')}" placeholder="/projects/Remedy Pills"></label>
       <div class="row"><button class="btn" type="submit">Save folder</button></div></form>
     <div class="row"><button class="btn ghost" type="button" id="rmBtn">Remove project</button></div>`);
