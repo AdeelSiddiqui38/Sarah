@@ -32,6 +32,7 @@ from pathlib import Path
 
 import invoice_match
 import wp_tools
+import marketing_agent
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -686,6 +687,11 @@ class H(BaseHTTPRequestHandler):
                 return self.send(500, {"error": "Could not write the backup: " + str(e)[:120]})
             audit("sarah", "wp_backup", {"dest": str(dest), **counts})
             return self.send(200, {"ok": True, "folder": str(dest), **counts})
+        if path == "/api/marketing/status":
+            return self.send(200, {"metrics": _mkt_json("mkt_metrics", []),
+                                   "open_items": _mkt_json("mkt_open_items", marketing_agent.DEFAULT_OPEN_ITEMS),
+                                   "google_posting": "ok" if setting("gbp_posting") == "ok" else "blocked",
+                                   "offer_end": setting("mkt_offer_end")})
         if path == "/api/ledger/match":
             return self.send(200, ledger_match())
         return self.send(404, {"error": "Not found"})
@@ -768,6 +774,33 @@ class H(BaseHTTPRequestHandler):
             folder = str(b.get("folder", "")).strip() or None
             q("INSERT INTO projects (slot,name,relevance,folder,agents,created) VALUES (?,?,?,?,?,?)", (slot, name, rel, folder, "{}", now()))
             audit("adeel", "project_created", {"name": name, "slot": slot + 1, "relevance": rel})
+            return self.send(200, {"ok": True})
+        if path == "/api/marketing/run":
+            p = find_project(str(b.get("project") or "Remedy Pills"))
+            if not p:
+                return self.send(404, {"error": "No such project."})
+            if not p["agents"].get("Marketing"):
+                return self.send(400, {"error": "The Marketing agent is off for this project. Switch it on first."})
+            return self.send(200, run_marketing(p, actor="adeel"))
+        if path == "/api/marketing/metrics":
+            try:
+                rows = marketing_agent.add_metrics(_mkt_json("mkt_metrics", []), b)
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            setting("mkt_metrics", json.dumps(rows))
+            audit("adeel", "marketing_metrics", {"date": rows[-1]["date"]})
+            return self.send(200, {"ok": True, "saved": rows[-1]})
+        if path == "/api/marketing/settings":
+            if "google_posting" in b:
+                setting("gbp_posting", "ok" if b["google_posting"] == "ok" else "blocked")
+            if "offer_end" in b:
+                v = str(b["offer_end"] or "").strip()
+                if v and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+                    return self.send(400, {"error": "offer_end must be YYYY-MM-DD."})
+                setting("mkt_offer_end", v or "none")
+            if isinstance(b.get("open_items"), list):
+                setting("mkt_open_items", json.dumps([str(i)[:200] for i in b["open_items"]][:30]))
+            audit("adeel", "marketing_settings", {k: b[k] for k in ("google_posting", "offer_end") if k in b})
             return self.send(200, {"ok": True})
         m = re.fullmatch(r"/api/projects/(\d+)/(agent|delete)", path)
         if m:
@@ -1207,6 +1240,48 @@ def monthly_invoice_job():
             audit("sarah", "monthly_invoice_missing", {"vendor": v["name"]})
 
 
+# ------------------------------------------------------- Marketing agent (draft-only, Remedy Pills website)
+def _mkt_json(key, default):
+    try:
+        return json.loads(setting(key) or "") or default
+    except ValueError:
+        return default
+
+
+def run_marketing(p, actor="sarah"):
+    """Build the weekly marketing brief for one project and leave it as a draft. Read-only: no posting, no site edits."""
+    results = marketing_agent.check_site()
+    home_status, home_html = marketing_agent.fetch(marketing_agent.SITE + "/")
+    end = setting("mkt_offer_end")
+    banner = marketing_agent.offer_banner_state(home_html if home_status == 200 else "", "" if end in (None, "none") else end)
+    pending = q("SELECT count(*) AS n FROM drafts WHERE status='pending'", one=True)["n"]
+    body = marketing_agent.build_brief(
+        results, _mkt_json("mkt_metrics", []), _mkt_json("mkt_open_items", marketing_agent.DEFAULT_OPEN_ITEMS),
+        setting("gbp_posting") != "ok", banner, pending)
+    week = datetime.now() - timedelta(days=datetime.now().weekday())
+    title = f"Weekly marketing brief, week of {week.strftime('%b %d')}"
+    if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+        return {"ok": True, "note": "This week's brief is already waiting for approval."}
+    did = make_draft(p, "Marketing", title, body, actor=actor)
+    audit(actor, "marketing_brief", {"project": p["name"], "draft": did,
+                                      "pages_with_issues": sum(1 for r in results if not r["ok"])})
+    return {"ok": True, "draft": did, "pages_with_issues": sum(1 for r in results if not r["ok"])}
+
+
+def marketing_job():
+    """Monday: one brief per project whose Marketing agent is on (the website check is built for Remedy Pills)."""
+    today = datetime.now()
+    if today.weekday() != 0:
+        return
+    key = f"marketing_brief_{today.isocalendar()[0]}-W{today.isocalendar()[1]:02d}"
+    if setting(key):
+        return
+    setting(key, now())
+    for p in list_projects():
+        if p["agents"].get("Marketing") and "remedy" in p["name"].lower():
+            run_marketing(p)
+
+
 def _task_loop():
     while True:
         try:
@@ -1217,6 +1292,10 @@ def _task_loop():
             monthly_invoice_job()
         except Exception as e:  # noqa: BLE001
             print("monthly invoice task error:", e, flush=True)
+        try:
+            marketing_job()
+        except Exception as e:  # noqa: BLE001
+            print("marketing task error:", e, flush=True)
         try:
             monthly_statements_task()
         except Exception as e:  # noqa: BLE001
