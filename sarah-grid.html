@@ -351,8 +351,12 @@ function openProject(id){
       <p class="note">Your accountant reviews and files. Sarah prepares and flags what is missing.</p>`
       : `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>`}
     ${p.agents.Finance ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">Open ledger</a></div>` : ''}
+    <form class="new" id="folderForm"><label for="pFolderEdit">Project folder (path on the NAS)<input id="pFolderEdit" type="text" value="${esc(p.folder || '')}" placeholder="/projects/Remedy Pills"></label>
+      <div class="row"><button class="btn" type="submit">Save folder</button></div></form>
     <div class="row"><button class="btn ghost" type="button" id="rmBtn">Remove project</button></div>`);
   decode($('mTitle'), p.name.toUpperCase());
+  $('folderForm').onsubmit = async e => { e.preventDefault(); await api('POST', `/api/projects/${p.id}/folder`, { folder: $('pFolderEdit').value.trim() });
+    sfx.ok(); await loadProjects(); loadAudit(); say(`Folder updated for ${p.name}.`); openProject(p.id); };
   m.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => { sfx.click(); await api('POST', `/api/projects/${p.id}/agent`, { agent: b.dataset.a }); await loadProjects(); loadAudit(); openProject(p.id); });
   $('rmBtn').onclick = async () => { const r = $('rmBtn'); if (!r.dataset.armed) { r.dataset.armed = 1; r.textContent = 'Click again to remove'; sfx.alert(); return; }
     await api('POST', `/api/projects/${p.id}/delete`, {}); closeModal(); await loadProjects(); loadAudit(); say(`Removed ${p.name}. Its slot is empty again.`); };
