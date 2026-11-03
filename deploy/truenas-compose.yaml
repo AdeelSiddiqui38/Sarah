@@ -56,6 +56,15 @@ services:
              cd /app && exec python sarah_core.py"
     restart: always
 
+  # Free natural voice (Kokoro text-to-speech, CPU only). Shares Sarah's network, so Sarah reaches it at 127.0.0.1:8880.
+  # Nothing is sent outside your NAS. First start downloads the image (a few GB); remove this service to switch it off.
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    restart: always
+
 configs:
   ts-serve:
     content: |
