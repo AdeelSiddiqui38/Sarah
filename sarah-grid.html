@@ -395,8 +395,16 @@ async function openSettings(){
     <form class="new" id="keyForm"><label for="pkind">Provider<select id="pkind"><option value="openai_api_key">OpenAI${v.have.openai ? ' (saved)' : ''}</option><option value="anthropic_api_key">Claude${v.have.claude ? ' (saved)' : ''}</option><option value="gmail_app_password">Gmail app password (pharmacy invoices)${v.have.gmail ? ' (saved)' : ''}</option><option value="wp_user">WordPress username (remedypills.ca)</option><option value="wp_app_password">WordPress application password (remedypills.ca)${v.have.wp ? ' (saved)' : ''}</option></select></label>
     <label for="ckey">API key (paste a new one to replace a saved one)<input id="ckey" type="password" autocomplete="off" placeholder="sk-..."></label>
     <div class="err" id="keyErr" hidden></div><div class="row"><button class="btn" type="submit">Save to vault</button>${v.have.gmail ? '<button class="btn" id="fetchInv" type="button">Fetch invoices now</button>' : ''}<button class="btn" id="runMkt" type="button">Run marketing brief now</button><button class="btn" id="runSoc" type="button">Run social drafts now</button><button class="btn ghost" id="restartSarah" type="button">Restart Sarah</button></div></form>
+    <div class="kv"><span>Sarah's voice</span><b>on this device</b></div>
+    <div class="row"><select id="voiceSel" aria-label="Voice"></select><select id="rateSel" aria-label="Speed"><option value="0.9">Slower</option><option value="1">Normal</option><option value="1.1">Faster</option></select><button class="btn" id="voiceTest" type="button">Test voice</button></div>
+    <p class="note">Tap MIC to talk and Sarah answers aloud; tap MIC again while she speaks to interrupt. Speech recognition on Android is done by Google, so keep private figures (shareholder balances, CRA details) for typing.</p>
     <p class="note">Keys go straight into the vault and are never shown again or sent anywhere except to the provider you choose.</p>`);
   for (const [id, p] of [['useOpenai', 'openai'], ['useClaude', 'claude']]) if ($(id)) $(id).onclick = async () => { try { await api('POST', '/api/brain', { provider: p }); sfx.ok(); await loadVault(); closeModal(); say('Switched brain to ' + (p === 'openai' ? 'OpenAI' : 'Claude') + '.'); } catch (x) { sfx.alert(); } };
+  { const sel = $('voiceSel'), en = voices.filter(v => /^en/i.test(v.lang)), cur = bestVoice();
+    sel.innerHTML = en.length ? en.map(v => `<option value="${esc(v.name)}"${cur && cur.name === v.name ? ' selected' : ''}>${esc(v.name)} (${esc(v.lang)})</option>`).join('') : '<option>No voices found</option>';
+    $('rateSel').value = ls.get('sarah_voice_rate', '1');
+    sel.onchange = () => { ls.set('sarah_voice_name', sel.value); }; $('rateSel').onchange = () => ls.set('sarah_voice_rate', $('rateSel').value);
+    $('voiceTest').onclick = () => { ls.set('sarah_voice_name', sel.value); ls.set('sarah_voice_rate', $('rateSel').value); speakText('Hello Adeel. This is how I sound on this device.'); }; }
   $('runMkt').onclick = async () => { const b = $('runMkt'); b.disabled = true; b.textContent = 'Checking the website...'; try { const r = await api('POST', '/api/marketing/run', { project: 'Remedy Pills' }); sfx.ok(); await loadDrafts(); loadAudit(); closeModal(); say(r.draft ? 'Marketing brief ready in the approval queue (' + r.pages_with_issues + ' page(s) with issues).' : (r.note || 'Done.')); } catch (x) { sfx.alert(); b.disabled = false; b.textContent = 'Run marketing brief now'; $('keyErr').textContent = x.message; $('keyErr').hidden = false; } };
   $('restartSarah').onclick = async () => { const b = $('restartSarah'); if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Tap again to restart'; sfx.alert(); return; }
     b.disabled = true; b.textContent = 'Restarting...'; try { await api('POST', '/api/restart', {}); } catch (x) {} say('Restarting. Reloading in 25 seconds.'); setTimeout(() => location.reload(), 25000); };
@@ -439,17 +447,33 @@ function renderBrief(){
 // ---------------- talk ----------------------------------------------------------------------------------------------------------
 function line(cls, html){ const d = document.createElement('div'); d.className = cls; d.innerHTML = html; $('log').appendChild(d); $('log').scrollTop = 1e9; }
 let voices = []; if ('speechSynthesis' in window) { voices = speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => { voices = speechSynthesis.getVoices(); }; }
+let viaMic = false;   // true while answering something the user said aloud: Sarah then speaks even if VOICE is off
+const ls = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+function bestVoice(){
+  const en = voices.filter(v => /^en/i.test(v.lang)); if (!en.length) return null;
+  const saved = ls.get('sarah_voice_name', ''); const s = en.find(v => v.name === saved); if (s) return s;
+  const score = v => (/natural|neural|online|enhanced|premium/i.test(v.name) ? 4 : 0) + (/google|samsung/i.test(v.name) ? 2 : 0) + (/samantha|ava|serena|karen|moira|zira|aria|jenny|female/i.test(v.name) ? 2 : 0) + (/en[-_](ca|us|gb)/i.test(v.lang) ? 1 : 0) - (v.localService === false ? 0 : 0);
+  return en.slice().sort((a, b) => score(b) - score(a))[0];
+}
+function speakText(text, onend){
+  if (!('speechSynthesis' in window)) return;
+  try { speechSynthesis.cancel(); } catch (e) {}
+  const clean = text.replace(/[*_`#>]+/g, '').replace(/https?:\/\/\S+/g, 'the link').replace(/\s+/g, ' ').trim();
+  const parts = clean.match(/[^.!?\n]+[.!?]*/g) || [clean];   // short pieces: Android stops long utterances after ~15 seconds
+  const v = bestVoice(), rate = parseFloat(ls.get('sarah_voice_rate', '1')) || 1;
+  parts.forEach((p, i) => { if (!p.trim()) return; const u = new SpeechSynthesisUtterance(p.trim()); if (v) { u.voice = v; u.lang = v.lang; } u.rate = rate;
+    if (i === parts.length - 1) u.onend = () => { speakUntil = 0; if (onend) onend(); }; speechSynthesis.speak(u); });
+}
 function say(text){
   line('sa', `<b>SARAH &gt;</b> ${esc(text)}`); speakUntil = performance.now() + Math.min(9000, 600 + text.length * 55); setState('speaking');
-  if (voiceOn && 'speechSynthesis' in window) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text);
-    const v = voices.find(v => /samantha|ava|serena|karen|moira|zira|aria|jenny|female/i.test(v.name) && /^en/i.test(v.lang)); if (v) u.voice = v;
-    u.onend = () => { speakUntil = 0; }; speechSynthesis.speak(u); } catch (e) {} }
+  if (voiceOn || viaMic) speakText(text);
 }
 function greet(){ const n = drafts.length; say(`Online. ${projects.length} project${projects.length === 1 ? '' : 's'} connected${n ? `, and ${n} draft${n === 1 ? '' : 's'} waiting for you` : ''}.`); }
-async function send(text){
-  line('me', '&gt; ' + esc(text)); sfx.click(); busy = true; setState('thinking');
+async function send(text, spoken){
+  line('me', '&gt; ' + esc(text)); sfx.click(); busy = true; setState('thinking'); viaMic = !!spoken;
   try { const r = await api('POST', '/api/chat', { text }); busy = false; say(r.reply); }
   catch (x) { busy = false; say(x.message); }
+  viaMic = false;
   await Promise.all([loadDrafts(), loadProjects(), loadAudit()]).catch(() => {});
 }
 $('cmdForm').onsubmit = e => { e.preventDefault(); const v = $('cmdInput').value.trim(); if (!v || busy) return; $('cmdInput').value = ''; send(v); };
@@ -461,10 +485,10 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null;
 if (!SR) { $('micBtn').hidden = true; } else {
   rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = false;
-  rec.onresult = e => { let t = ''; for (const r of e.results) t += r[0].transcript; $('cmdInput').value = t; if (e.results[e.results.length - 1].isFinal) { $('cmdInput').value = ''; send(t.trim()); } };
+  rec.onresult = e => { let t = ''; for (const r of e.results) t += r[0].transcript; $('cmdInput').value = t; if (e.results[e.results.length - 1].isFinal) { $('cmdInput').value = ''; send(t.trim(), true); } };
   rec.onend = () => { listening = false; $('micBtn').classList.remove('on'); $('micBtn').setAttribute('aria-pressed', 'false'); if (state === 'listening') setState('idle'); };
   rec.onerror = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') say('Microphone problem: ' + e.error + '.'); };
-  $('micBtn').onclick = () => { sfx.click(); if (listening) { rec.stop(); return; } try { speechSynthesis && speechSynthesis.cancel(); } catch (e) {}
+  $('micBtn').onclick = () => { sfx.click(); if (listening) { rec.stop(); return; } try { speechSynthesis && speechSynthesis.cancel(); speakUntil = 0; } catch (e) {}
     try { rec.start(); listening = true; $('micBtn').classList.add('on'); $('micBtn').setAttribute('aria-pressed', 'true'); setState('listening'); } catch (e) {} };
 }
 
