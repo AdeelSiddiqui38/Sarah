@@ -799,6 +799,10 @@ class H(BaseHTTPRequestHandler):
             q("INSERT INTO projects (slot,name,relevance,folder,agents,created) VALUES (?,?,?,?,?,?)", (slot, name, rel, folder, "{}", now()))
             audit("adeel", "project_created", {"name": name, "slot": slot + 1, "relevance": rel})
             return self.send(200, {"ok": True})
+        if path == "/api/restart":
+            audit("adeel", "restart_requested", {})
+            threading.Timer(1.0, lambda: os._exit(0)).start()   # the NAS restarts the container, which pulls the latest code
+            return self.send(200, {"ok": True, "note": "Restarting. Back in about 20 seconds."})
         if path == "/api/social/run":
             p = find_project(str(b.get("project") or "Remedy Pills"))
             if not p:
