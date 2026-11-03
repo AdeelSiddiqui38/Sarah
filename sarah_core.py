@@ -802,12 +802,19 @@ class H(BaseHTTPRequestHandler):
             audit("adeel", "project_created", {"name": name, "slot": slot + 1, "relevance": rel})
             return self.send(200, {"ok": True})
         if path == "/api/tts":
-            text = str(b.get("text", "")).strip()[:700]
+            text = str(b.get("text", "")).strip()[:900]
             if not text:
                 return self.send(400, {"error": "Nothing to say."})
+            voice = str(b.get("voice") or KOKORO_VOICE)
+            if not re.fullmatch(r"[a-z]{2}_[a-z]+(\+[a-z]{2}_[a-z]+)?", voice):
+                voice = KOKORO_VOICE
+            try:
+                speed = min(1.3, max(0.7, float(b.get("speed") or 1.0)))
+            except (TypeError, ValueError):
+                speed = 1.0
             try:
                 req = urllib.request.Request(KOKORO_URL.rstrip("/") + "/v1/audio/speech", method="POST",
-                                             data=json.dumps({"model": "kokoro", "input": text, "voice": KOKORO_VOICE, "response_format": "mp3"}).encode(),
+                                             data=json.dumps({"model": "kokoro", "input": text, "voice": voice, "speed": speed, "response_format": "mp3"}).encode(),
                                              headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=40) as r:
                     audio = r.read()

@@ -396,7 +396,7 @@ async function openSettings(){
     <label for="ckey">API key (paste a new one to replace a saved one)<input id="ckey" type="password" autocomplete="off" placeholder="sk-..."></label>
     <div class="err" id="keyErr" hidden></div><div class="row"><button class="btn" type="submit">Save to vault</button>${v.have.gmail ? '<button class="btn" id="fetchInv" type="button">Fetch invoices now</button>' : ''}<button class="btn" id="runMkt" type="button">Run marketing brief now</button><button class="btn" id="runSoc" type="button">Run social drafts now</button><button class="btn ghost" id="restartSarah" type="button">Restart Sarah</button></div></form>
     <div class="kv"><span>Sarah's voice</span><b>on this device</b></div>
-    <div class="row"><select id="voiceSel" aria-label="Voice"></select><select id="rateSel" aria-label="Speed"><option value="0.9">Slower</option><option value="1">Normal</option><option value="1.1">Faster</option></select><button class="btn" id="voiceTest" type="button">Test voice</button></div>
+    <div class="row"><select id="kvSel" aria-label="Natural voice"><option value="af_heart">Heart (warm)</option><option value="af_bella">Bella</option><option value="af_nicole">Nicole (soft)</option><option value="af_sarah">Sarah</option><option value="af_sky">Sky</option><option value="af_nova">Nova</option><option value="af_river">River</option><option value="af_kore">Kore</option><option value="af_jessica">Jessica</option><option value="bf_emma">Emma (British)</option><option value="bf_isabella">Isabella (British)</option><option value="bf_lily">Lily (British)</option><option value="af_heart+af_bella">Heart + Bella (blend)</option><option value="af_bella+af_nicole">Bella + Nicole (blend)</option></select><select id="voiceSel" aria-label="Voice"></select><select id="rateSel" aria-label="Speed"><option value="0.9">Slower</option><option value="1">Normal</option><option value="1.1">Faster</option></select><button class="btn" id="voiceTest" type="button">Test voice</button></div>
     <p class="note">Tap MIC to talk and Sarah answers aloud; tap MIC again while she speaks to interrupt. Speech recognition on Android is done by Google, so keep private figures (shareholder balances, CRA details) for typing.</p>
     <p class="note">Keys go straight into the vault and are never shown again or sent anywhere except to the provider you choose.</p>`);
   for (const [id, p] of [['useOpenai', 'openai'], ['useClaude', 'claude']]) if ($(id)) $(id).onclick = async () => { try { await api('POST', '/api/brain', { provider: p }); sfx.ok(); await loadVault(); closeModal(); say('Switched brain to ' + (p === 'openai' ? 'OpenAI' : 'Claude') + '.'); } catch (x) { sfx.alert(); } };
@@ -404,6 +404,7 @@ async function openSettings(){
     sel.innerHTML = '<option value="__kokoro">Natural voice (Kokoro on your NAS)</option>' + (en.length ? en.map(v => `<option value="${esc(v.name)}"${cur && cur.name === v.name ? ' selected' : ''}>${esc(v.name)} (${esc(v.lang)})</option>`).join('') : '<option>No device voices found</option>');
     if (ls.get('sarah_voice_engine', 'device') === 'kokoro') sel.value = '__kokoro';
     $('rateSel').value = ls.get('sarah_voice_rate', '1');
+    $('kvSel').value = ls.get('sarah_kokoro_voice', 'af_heart'); $('kvSel').onchange = () => { ls.set('sarah_kokoro_voice', $('kvSel').value); ls.set('sarah_voice_engine', 'kokoro'); sel.value = '__kokoro'; speakText('Hello Adeel. This is how I sound.'); };
     sel.onchange = () => { if (sel.value === '__kokoro') ls.set('sarah_voice_engine', 'kokoro'); else { ls.set('sarah_voice_engine', 'device'); ls.set('sarah_voice_name', sel.value); } }; $('rateSel').onchange = () => ls.set('sarah_voice_rate', $('rateSel').value);
     $('voiceTest').onclick = () => { sel.onchange(); ls.set('sarah_voice_rate', $('rateSel').value); speakText('Hello Adeel. This is how I sound on this device.'); }; }
   $('runMkt').onclick = async () => { const b = $('runMkt'); b.disabled = true; b.textContent = 'Checking the website...'; try { const r = await api('POST', '/api/marketing/run', { project: 'Remedy Pills' }); sfx.ok(); await loadDrafts(); loadAudit(); closeModal(); say(r.draft ? 'Marketing brief ready in the approval queue (' + r.pages_with_issues + ' page(s) with issues).' : (r.note || 'Done.')); } catch (x) { sfx.alert(); b.disabled = false; b.textContent = 'Run marketing brief now'; $('keyErr').textContent = x.message; $('keyErr').hidden = false; } };
@@ -460,7 +461,7 @@ let kAudio = null, kRun = 0;
 function stopSpeech(){ kRun++; try { speechSynthesis.cancel(); } catch (e) {} if (kAudio) { try { kAudio.pause(); } catch (e) {} kAudio = null; } }
 async function speakKokoro(parts, onend){
   const run = ++kRun; const pend = parts.map(p => p.trim()).filter(Boolean);
-  const fetchOne = async t => { const r = await fetch('/api/tts', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Sarah': '1' }, body: JSON.stringify({ text: t }) }); if (!r.ok) throw new Error('tts'); return URL.createObjectURL(await r.blob()); };
+  const fetchOne = async t => { const r = await fetch('/api/tts', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Sarah': '1' }, body: JSON.stringify({ text: t, voice: ls.get('sarah_kokoro_voice', 'af_heart'), speed: parseFloat(ls.get('sarah_voice_rate', '1')) || 1 }) }); if (!r.ok) throw new Error('tts'); return URL.createObjectURL(await r.blob()); };
   try {
     let next = fetchOne(pend[0]);
     for (let i = 0; i < pend.length; i++) {
@@ -476,7 +477,9 @@ function speakText(text, onend){
   stopSpeech();
   const clean0 = text.replace(/[*_`#>]+/g, '').replace(/https?:\/\/\S+/g, 'the link').replace(/\s+/g, ' ').trim();
   const parts0 = clean0.match(/[^.!?\n]+[.!?]*/g) || [clean0];
-  if (ls.get('sarah_voice_engine', 'device') === 'kokoro') { speakKokoro(parts0, onend); return; }
+  if (ls.get('sarah_voice_engine', 'device') === 'kokoro') {
+    const groups = []; let cur = ''; for (const p of parts0) { if (cur && (cur + ' ' + p).length > 220) { groups.push(cur); cur = p.trim(); } else cur = (cur ? cur + ' ' : '') + p.trim(); } if (cur) groups.push(cur);
+    speakKokoro(groups, onend); return; }
   speakDevice(text, onend);
 }
 function speakDevice(text, onend){
