@@ -645,6 +645,18 @@ class H(BaseHTTPRequestHandler):
             return self.send(403, {"error": "This Tailscale account is not allowed."})
         if path in ("/", "/index.html", "/sarah-grid.html"):
             return self.send(200, raw=UI_FILE.read_bytes(), ctype="text/html; charset=utf-8")
+        if path == "/manifest.webmanifest":
+            man = {"name": "SARAH", "short_name": "SARAH", "start_url": "/", "scope": "/", "display": "standalone",
+                   "background_color": "#020c14", "theme_color": "#020c14",
+                   "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                             {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                             {"src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]}
+            return self.send(200, man, ctype="application/manifest+json")
+        if path in ("/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png", "/icons/apple-touch-icon.png"):
+            try:
+                return self.send(200, raw=(Path(__file__).parent / path.lstrip("/")).read_bytes(), ctype="image/png")
+            except OSError:
+                return self.send(404, {"error": "No such icon."})
         if path == "/ledger":
             if not self.authed():
                 return self.send(302, raw=b"", headers={"Location": "/"})
