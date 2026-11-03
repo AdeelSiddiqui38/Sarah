@@ -46,6 +46,8 @@ INVOICE_DIR = Path(os.environ.get("SARAH_INVOICE_DIR", DATA_DIR / "invoices"))  
 GMAIL_USER = os.environ.get("SARAH_GMAIL_USER", "remedypillspharmacy@gmail.com")
 LEDGER_HTML = Path(os.environ.get("SARAH_LEDGER_HTML", str(Path(os.environ.get("SARAH_PROJECTS_ROOT", Path.home() / "Documents")) / "Remedy Pills" / "Finance" / "Accounts" / "Remedy_Ledger_Main.html")))
 LEDGER_LOCAL_KEYS = {"remedy_page_v1", "remedy_theme_v1"}  # per-viewer look, not shared data
+KOKORO_URL = os.environ.get("SARAH_KOKORO_URL", "http://127.0.0.1:8880")   # free local text-to-speech container (optional)
+KOKORO_VOICE = os.environ.get("SARAH_KOKORO_VOICE", "af_heart")
 HOST, PORT = "127.0.0.1", int(os.environ.get("SARAH_PORT", "8770"))
 SESSION_HOURS = 12
 MAX_FAILS, LOCK_SECONDS = 5, 300
@@ -799,6 +801,19 @@ class H(BaseHTTPRequestHandler):
             q("INSERT INTO projects (slot,name,relevance,folder,agents,created) VALUES (?,?,?,?,?,?)", (slot, name, rel, folder, "{}", now()))
             audit("adeel", "project_created", {"name": name, "slot": slot + 1, "relevance": rel})
             return self.send(200, {"ok": True})
+        if path == "/api/tts":
+            text = str(b.get("text", "")).strip()[:700]
+            if not text:
+                return self.send(400, {"error": "Nothing to say."})
+            try:
+                req = urllib.request.Request(KOKORO_URL.rstrip("/") + "/v1/audio/speech", method="POST",
+                                             data=json.dumps({"model": "kokoro", "input": text, "voice": KOKORO_VOICE, "response_format": "mp3"}).encode(),
+                                             headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=40) as r:
+                    audio = r.read()
+            except Exception:  # noqa: BLE001
+                return self.send(503, {"error": "Natural voice is not running on the NAS."})
+            return self.send(200, raw=audio, ctype="audio/mpeg")
         if path == "/api/restart":
             audit("adeel", "restart_requested", {})
             threading.Timer(1.0, lambda: os._exit(0)).start()   # the NAS restarts the container, which pulls the latest code

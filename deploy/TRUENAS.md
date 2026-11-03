@@ -35,3 +35,7 @@ Share `POOL/sarah/projects` over SMB and copy each project's folder there (for e
 - Apps > sarah > Logs: the `tailscale` log shows login problems (expired or wrong auth key).
 - Page loads but Unlock fails with "Blocked by the shield": the `SARAH_ORIGINS` address does not exactly match the address in your browser.
 - "This Tailscale account is not allowed": `SARAH_ALLOWED_USERS` does not match your Tailscale login.
+
+## Natural voice (Kokoro, optional, free)
+Add the `kokoro` service from `truenas-compose.yaml` to the Sarah app (Apps > sarah > Edit > YAML), save, wait for the image to download.
+In Sarah: Settings > Sarah's voice > "Natural voice (Kokoro on your NAS)" > Test voice. If Kokoro is off or slow, Sarah falls back to the phone's own voice.

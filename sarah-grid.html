@@ -401,10 +401,11 @@ async function openSettings(){
     <p class="note">Keys go straight into the vault and are never shown again or sent anywhere except to the provider you choose.</p>`);
   for (const [id, p] of [['useOpenai', 'openai'], ['useClaude', 'claude']]) if ($(id)) $(id).onclick = async () => { try { await api('POST', '/api/brain', { provider: p }); sfx.ok(); await loadVault(); closeModal(); say('Switched brain to ' + (p === 'openai' ? 'OpenAI' : 'Claude') + '.'); } catch (x) { sfx.alert(); } };
   { const sel = $('voiceSel'), en = voices.filter(v => /^en/i.test(v.lang)), cur = bestVoice();
-    sel.innerHTML = en.length ? en.map(v => `<option value="${esc(v.name)}"${cur && cur.name === v.name ? ' selected' : ''}>${esc(v.name)} (${esc(v.lang)})</option>`).join('') : '<option>No voices found</option>';
+    sel.innerHTML = '<option value="__kokoro">Natural voice (Kokoro on your NAS)</option>' + (en.length ? en.map(v => `<option value="${esc(v.name)}"${cur && cur.name === v.name ? ' selected' : ''}>${esc(v.name)} (${esc(v.lang)})</option>`).join('') : '<option>No device voices found</option>');
+    if (ls.get('sarah_voice_engine', 'device') === 'kokoro') sel.value = '__kokoro';
     $('rateSel').value = ls.get('sarah_voice_rate', '1');
-    sel.onchange = () => { ls.set('sarah_voice_name', sel.value); }; $('rateSel').onchange = () => ls.set('sarah_voice_rate', $('rateSel').value);
-    $('voiceTest').onclick = () => { ls.set('sarah_voice_name', sel.value); ls.set('sarah_voice_rate', $('rateSel').value); speakText('Hello Adeel. This is how I sound on this device.'); }; }
+    sel.onchange = () => { if (sel.value === '__kokoro') ls.set('sarah_voice_engine', 'kokoro'); else { ls.set('sarah_voice_engine', 'device'); ls.set('sarah_voice_name', sel.value); } }; $('rateSel').onchange = () => ls.set('sarah_voice_rate', $('rateSel').value);
+    $('voiceTest').onclick = () => { sel.onchange(); ls.set('sarah_voice_rate', $('rateSel').value); speakText('Hello Adeel. This is how I sound on this device.'); }; }
   $('runMkt').onclick = async () => { const b = $('runMkt'); b.disabled = true; b.textContent = 'Checking the website...'; try { const r = await api('POST', '/api/marketing/run', { project: 'Remedy Pills' }); sfx.ok(); await loadDrafts(); loadAudit(); closeModal(); say(r.draft ? 'Marketing brief ready in the approval queue (' + r.pages_with_issues + ' page(s) with issues).' : (r.note || 'Done.')); } catch (x) { sfx.alert(); b.disabled = false; b.textContent = 'Run marketing brief now'; $('keyErr').textContent = x.message; $('keyErr').hidden = false; } };
   $('restartSarah').onclick = async () => { const b = $('restartSarah'); if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Tap again to restart'; sfx.alert(); return; }
     b.disabled = true; b.textContent = 'Restarting...'; try { await api('POST', '/api/restart', {}); } catch (x) {} say('Restarting. Reloading in 25 seconds.'); setTimeout(() => location.reload(), 25000); };
@@ -455,7 +456,30 @@ function bestVoice(){
   const score = v => (/natural|neural|online|enhanced|premium/i.test(v.name) ? 4 : 0) + (/google|samsung/i.test(v.name) ? 2 : 0) + (/samantha|ava|serena|karen|moira|zira|aria|jenny|female/i.test(v.name) ? 2 : 0) + (/en[-_](ca|us|gb)/i.test(v.lang) ? 1 : 0) - (v.localService === false ? 0 : 0);
   return en.slice().sort((a, b) => score(b) - score(a))[0];
 }
+let kAudio = null, kRun = 0;
+function stopSpeech(){ kRun++; try { speechSynthesis.cancel(); } catch (e) {} if (kAudio) { try { kAudio.pause(); } catch (e) {} kAudio = null; } }
+async function speakKokoro(parts, onend){
+  const run = ++kRun; const pend = parts.map(p => p.trim()).filter(Boolean);
+  const fetchOne = async t => { const r = await fetch('/api/tts', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Sarah': '1' }, body: JSON.stringify({ text: t }) }); if (!r.ok) throw new Error('tts'); return URL.createObjectURL(await r.blob()); };
+  try {
+    let next = fetchOne(pend[0]);
+    for (let i = 0; i < pend.length; i++) {
+      const url = await next; if (run !== kRun) return;
+      if (i + 1 < pend.length) next = fetchOne(pend[i + 1]);   // prepare the next sentence while this one plays
+      await new Promise(res => { const a = new Audio(url); kAudio = a; a.onended = a.onerror = () => { URL.revokeObjectURL(url); res(); }; a.play().catch(res); });
+      if (run !== kRun) return;
+    }
+    speakUntil = 0; if (onend) onend();
+  } catch (e) { if (run === kRun) { ls.set('sarah_voice_engine', 'device'); speakDevice(parts.join(' '), onend); } }
+}
 function speakText(text, onend){
+  stopSpeech();
+  const clean0 = text.replace(/[*_`#>]+/g, '').replace(/https?:\/\/\S+/g, 'the link').replace(/\s+/g, ' ').trim();
+  const parts0 = clean0.match(/[^.!?\n]+[.!?]*/g) || [clean0];
+  if (ls.get('sarah_voice_engine', 'device') === 'kokoro') { speakKokoro(parts0, onend); return; }
+  speakDevice(text, onend);
+}
+function speakDevice(text, onend){
   if (!('speechSynthesis' in window)) return;
   try { speechSynthesis.cancel(); } catch (e) {}
   const clean = text.replace(/[*_`#>]+/g, '').replace(/https?:\/\/\S+/g, 'the link').replace(/\s+/g, ' ').trim();
@@ -488,7 +512,7 @@ if (!SR) { $('micBtn').hidden = true; } else {
   rec.onresult = e => { let t = ''; for (const r of e.results) t += r[0].transcript; $('cmdInput').value = t; if (e.results[e.results.length - 1].isFinal) { $('cmdInput').value = ''; send(t.trim(), true); } };
   rec.onend = () => { listening = false; $('micBtn').classList.remove('on'); $('micBtn').setAttribute('aria-pressed', 'false'); if (state === 'listening') setState('idle'); };
   rec.onerror = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') say('Microphone problem: ' + e.error + '.'); };
-  $('micBtn').onclick = () => { sfx.click(); if (listening) { rec.stop(); return; } try { speechSynthesis && speechSynthesis.cancel(); speakUntil = 0; } catch (e) {}
+  $('micBtn').onclick = () => { sfx.click(); if (listening) { rec.stop(); return; } stopSpeech(); speakUntil = 0;
     try { rec.start(); listening = true; $('micBtn').classList.add('on'); $('micBtn').setAttribute('aria-pressed', 'true'); setState('listening'); } catch (e) {} };
 }
 
