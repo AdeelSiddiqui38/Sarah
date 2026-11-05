@@ -26,6 +26,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import parse_qs, urlparse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,6 +38,7 @@ import social_agent
 import apex_finance
 import apex_vendors
 import apex_mail
+import apex_report
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -732,6 +734,21 @@ class H(BaseHTTPRequestHandler):
             except (OSError, ValueError, KeyError) as e:
                 audit("sarah", "apex_read_error", {"msg": str(e)[:200]})
                 return self.send(500, {"error": "Could not read the APEX Cost Controller or statements."})
+        if path == "/api/apex/report":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            p = apex_project()
+            if not p:
+                return self.send(404, {"error": "Turn on the Finance agent for the APEX Physio project and set its folder."})
+            try:
+                month = (parse_qs(urlparse(self.path).query).get("month") or [None])[0]
+                r = apex_report.build(p["folder"], APEX_DATA_DIR, month)
+                return self.send(200, {"report": r, "text": apex_report.text(r)})
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except (OSError, KeyError) as e:
+                audit("sarah", "apex_report_error", {"msg": str(e)[:200]})
+                return self.send(500, {"error": "Could not build the report."})
         if path == "/api/apex/mail":
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
@@ -840,6 +857,21 @@ class H(BaseHTTPRequestHandler):
             except OSError as e:
                 audit("sarah", "apex_vendor_error", {"msg": str(e)[:200]})
                 return self.send(500, {"error": "Could not write to the Vendor Invoices folder on the NAS (is the writable folder mounted?)."})
+        if path == "/api/apex/report-notes":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            p = apex_project()
+            if not p:
+                return self.send(404, {"error": "Turn on the Finance agent for the APEX Physio project and set its folder."})
+            try:
+                with _apex_lock:
+                    apex_report.save_notes(p["folder"], str(b.get("month", "")), b.get("progress"), b.get("decisions"), APEX_DATA_DIR)
+                r = apex_report.build(p["folder"], APEX_DATA_DIR, str(b.get("month", "")))
+                return self.send(200, {"report": r, "text": apex_report.text(r)})
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except OSError:
+                return self.send(500, {"error": "Could not write to Sarah Data on the NAS."})
         if path == "/api/apex/payable":
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
@@ -1533,6 +1565,10 @@ def _task_loop():
         except Exception as e:  # noqa: BLE001
             print("monthly invoice task error:", e, flush=True)
         try:
+            apex_report_job()
+        except Exception as e:  # noqa: BLE001
+            print("apex report task error:", e, flush=True)
+        try:
             marketing_job()
         except Exception as e:  # noqa: BLE001
             print("marketing task error:", e, flush=True)
@@ -1549,6 +1585,23 @@ def _task_loop():
         except Exception as e:  # noqa: BLE001
             print("apex task error:", e, flush=True)
         time.sleep(3600)
+
+
+def apex_report_job():
+    """From the 1st: leave one DRAFT (for Adeel to review and send himself) with last month's partner snapshot."""
+    today = datetime.now()
+    p = apex_project()
+    if not p:
+        return
+    month = apex_report.previous_month(today.date())
+    key = "apex_report_" + month
+    if setting(key):
+        return
+    with _apex_lock:
+        r = apex_report.build(p["folder"], APEX_DATA_DIR, month, today.date())
+        make_draft(p, "Finance", f"APEX Physio partner snapshot – {month}", apex_report.text(r), actor="sarah")
+    setting(key, now())
+    audit("sarah", "apex_report_draft", {"month": month})
 
 
 def _mail_loop():

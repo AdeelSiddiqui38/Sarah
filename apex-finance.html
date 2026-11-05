@@ -83,6 +83,26 @@ function renderMail(box, m) {
 async function loadMail(box) {
   try { renderMail(box, await api('GET', '/api/apex/mail')); } catch (e) { box.replaceChildren(h('div', {class: 'sub'}, 'Mailbox status unavailable.')); }
 }
+function renderReport(box, j) {
+  box.replaceChildren();
+  const r = j.report;
+  const mi = h('input', {type: 'month', value: r.month, onchange: e => e.target.value && loadReport(box, e.target.value)});
+  const prog = h('textarea', {rows: 4, style: 'width:100%', 'aria-label': 'Progress notes', placeholder: 'Progress this month, one per line (permits, equipment arrived, opening date…)'}, (r.progress || []).join('\n'));
+  const dec = h('textarea', {rows: 3, style: 'width:100%', 'aria-label': 'Decisions needed', placeholder: 'Decisions needed from partners, one per line'}, '');
+  const save = h('button', {type: 'button', onclick: async () => {
+    const lines = t => t.value.split('\n').map(x => x.trim()).filter(Boolean);
+    try { renderReport(box, await api('POST', '/api/apex/report-notes', {month: r.month, progress: lines(prog), decisions: lines(dec)})); } catch (e) { alert(e.message); }
+  }}, 'Save notes');
+  const copy = h('button', {type: 'button', onclick: () => navigator.clipboard && navigator.clipboard.writeText(j.text).then(() => { copy.textContent = 'Copied'; })}, 'Copy snapshot');
+  box.append(h('div', {class: 'sub'}, 'Sarah drafts this on the 1st for the month just ended (draft only; you review and send). Figures come from the workbook and statements; add the progress notes yourself.'),
+    h('div', {class: 'row', style: 'margin:8px 0;gap:8px'}, h('span', {}, 'Month'), mi, copy),
+    h('pre', {style: 'white-space:pre-wrap;font:inherit;margin:8px 0'}, j.text),
+    h('div', {class: 'sub'}, 'Progress notes'), prog, h('div', {class: 'sub'}, 'Decisions needed'), dec,
+    h('div', {class: 'row', style: 'margin-top:8px'}, save));
+}
+async function loadReport(box, month) {
+  try { renderReport(box, await api('GET', '/api/apex/report' + (month ? '?month=' + encodeURIComponent(month) : ''))); } catch (e) { box.replaceChildren(h('div', {class: 'sub'}, e.message)); }
+}
 let DATA = null;
 function render(d) {
   DATA = d;
@@ -168,6 +188,11 @@ function render(d) {
     h('div', {class: 'row', style: 'margin:8px 0'}, up, upBtn),
     irows.length ? [table(['', 'File', 'Vendor', 'Invoice date', 'Total'], irows, [4]), h('div', {class: 'row', style: 'margin-top:10px'}, fileBtn)] : h('div', {class: 'sub'}, 'Inbox is empty.'),
     (vi.vendors || []).length ? [h('div', {style: 'height:8px'}), table(['Vendor folder', 'Files', 'Latest month'], vi.vendors.map(v => [v.vendor, String(v.files), v.latest]), [1])] : null));
+
+  // monthly partner snapshot
+  const repBox = h('div', {}, h('div', {class: 'sub'}, 'Loading…'));
+  app.append(panel('Monthly partner snapshot', repBox));
+  loadReport(repBox, null);
 
   // add an unpaid bill
   const pf = {};
