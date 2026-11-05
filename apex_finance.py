@@ -606,7 +606,7 @@ def match_invoices(folder, ddir=None):
 
 
 # ---------------------------------------------------------------- reminders (each becomes at most one draft)
-def reminders(folder, ddir=None, today=None, scan=None):
+def reminders(folder, ddir=None, today=None, scan=None, matches=None):
     today = today or dt.date.today()
     rows = all_rows(folder, ddir)
     sheets = read_sheets(folder)
@@ -625,7 +625,7 @@ def reminders(folder, ddir=None, today=None, scan=None):
             out.append({"key": f"apex_inv_{it['ref']}_{wk[0]}W{wk[1]:02d}", "title": f"APEX: PrimeRidge {it['ref']} is due (${it['total']:,.2f})",
                         "body": f"{it['desc']}. Status is Due in the Cost Controller. Pay from OpCo, then record it in the Ledger as Expense / Construction. "
                                 "Sarah does not pay anything."})
-    for m in match_invoices(folder, ddir)["matches"]:
+    for m in (matches if matches is not None else match_invoices(folder, ddir))["matches"]:
         if m["status"].startswith("Part paid"):
             out.append({"key": "apex_part_" + re.sub(r"\W+", "", m["invoice"]) + f"_{int(m['paid'])}", "title": f"APEX: {m['invoice']} is only part paid",
                         "body": f"{m['status']} (invoice ${m['total']:,.2f}, paid ${m['paid']:,.2f}). The Construction Budget tab may show it as Paid; "
@@ -656,7 +656,7 @@ def full(folder, ddir=None, today=None):
     """Everything the APEX Finance page shows, in one call (read-only, nothing is saved)."""
     out = overview(folder, ddir)
     out["invoices"] = match_invoices(folder, ddir)
-    out["reminders"] = reminders(folder, ddir, today)
+    out["reminders"] = reminders(folder, ddir, today, matches=out["invoices"])
     con = out["summary"].get("construction") or {}
     for it in con.get("items", []):
         m = re.search(r"Milestone\s+(\d+)", it["desc"])
