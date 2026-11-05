@@ -1536,9 +1536,9 @@ def _task_loop():
 
 
 def _mail_loop():
-    """Read-only check of the APEX info mailbox every 15 minutes (only if a password is set)."""
+    """Read-only check of the APEX info mailbox every 6 hours (only if a password is set)."""
     while True:
-        time.sleep(900)
+        time.sleep(6 * 3600)
         try:
             p = apex_project()
             if p and apex_mail.configured():
