@@ -526,14 +526,19 @@ FIELDS = ("date", "account", "type", "category", "desc", "in", "out", "shared", 
 
 
 def add_payable(folder, row, ddir=None):
-    """Record an unpaid bill (status Due) straight into the approved ledger additions. No money moves."""
+    """Record a bill (Due, or already paid personally by a partner) straight into the approved ledger additions. No money moves."""
     try:
         date = dt.date.fromisoformat(str(row.get("date", "")))
         amt = round(float(row.get("amount", 0)), 2)
     except (ValueError, TypeError):
         raise ValueError("Enter a valid date and amount.")
     acct = str(row.get("account", "OpCo"))
-    if acct not in ("OpCo", "HoldCo"):
+    fronted = str(row.get("fronted_by", "")).strip()
+    if fronted:
+        if fronted not in ("Huzefa", "Zara", "Adeel"):
+            raise ValueError("Pick Huzefa, Zara or Adeel.")
+        acct = "Personal-" + fronted
+    elif acct not in ("OpCo", "HoldCo"):
         raise ValueError("Pick OpCo or HoldCo.")
     desc = " ".join(str(row.get("desc", "")).split())[:120]
     cat = " ".join(str(row.get("category", "")).split())[:40]
@@ -545,8 +550,8 @@ def add_payable(folder, row, ddir=None):
     if any(r.get("id") == rid for r in adds["rows"]):
         raise ValueError("That bill is already recorded.")
     adds["rows"].append({"date": date.isoformat(), "account": acct, "type": "Expense", "category": cat, "desc": desc,
-                         "in": 0.0, "out": amt, "shared": "Y" if row.get("shared", True) else "N", "paid_by": "",
-                         "status": "Due", "notes": str(row.get("notes", ""))[:300], "id": rid,
+                         "in": 0.0, "out": amt, "shared": "Y" if row.get("shared", True) else "N", "paid_by": fronted,
+                         "status": "Paid" if fronted else "Due", "notes": str(row.get("notes", ""))[:300], "id": rid,
                          "approved": dt.date.today().isoformat()})
     _save(path, adds)
     return rid

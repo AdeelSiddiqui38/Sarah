@@ -172,12 +172,13 @@ function render(d) {
   // add an unpaid bill
   const pf = {};
   const fld = (k, label, attrs) => { pf[k] = h('input', Object.assign({'aria-label': label, placeholder: label}, attrs || {})); return pf[k]; };
-  app.append(panel('Add an unpaid bill (accounts payable)',
+  app.append(panel('Add a bill (payable, or paid personally by a partner)',
     h('div', {class: 'sub'}, 'Records it in the ledger as Due. Nothing is paid; the bank balance does not change until the payment shows on a statement.'),
     h('div', {class: 'row', style: 'margin:8px 0;flex-wrap:wrap;gap:8px'},
+      (pf.fronted = h('select', {'aria-label': 'Who paid'}, h('option', {value: ''}, 'Unpaid (Due)'), ['Huzefa', 'Zara', 'Adeel'].map(n => h('option', {value: n}, 'Paid by ' + n)))),
       fld('date', 'Invoice date', {type: 'date'}), fld('desc', 'Vendor and invoice no.'), fld('category', 'Category (e.g. Gym Fit-Out)'), fld('amount', 'Total incl. GST', {type: 'number', step: '0.01'}),
       h('button', {type: 'button', onclick: async () => {
-        try { render(await api('POST', '/api/apex/payable', {date: pf.date.value, desc: pf.desc.value, category: pf.category.value, amount: pf.amount.value, account: 'OpCo', shared: true})); }
+        try { render(await api('POST', '/api/apex/payable', {date: pf.date.value, desc: pf.desc.value, category: pf.category.value, amount: pf.amount.value, account: 'OpCo', shared: true, fronted_by: pf.fronted.value, notes: pf.fronted.value ? `Paid personally by ${pf.fronted.value} – OWED BACK from OpCo.` : ''})); }
         catch (e) { alert(e.message); }
       }}, 'Add as Due'))));
 
