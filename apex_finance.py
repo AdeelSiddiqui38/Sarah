@@ -525,6 +525,33 @@ def load_proposals(folder, ddir=None):
 FIELDS = ("date", "account", "type", "category", "desc", "in", "out", "shared", "paid_by", "status", "notes")
 
 
+def add_payable(folder, row, ddir=None):
+    """Record an unpaid bill (status Due) straight into the approved ledger additions. No money moves."""
+    try:
+        date = dt.date.fromisoformat(str(row.get("date", "")))
+        amt = round(float(row.get("amount", 0)), 2)
+    except (ValueError, TypeError):
+        raise ValueError("Enter a valid date and amount.")
+    acct = str(row.get("account", "OpCo"))
+    if acct not in ("OpCo", "HoldCo"):
+        raise ValueError("Pick OpCo or HoldCo.")
+    desc = " ".join(str(row.get("desc", "")).split())[:120]
+    cat = " ".join(str(row.get("category", "")).split())[:40]
+    if amt <= 0 or not desc or not cat:
+        raise ValueError("Description, category and an amount above zero are required.")
+    path = data_dir(folder, ddir) / "apex-ledger-adds.json"
+    adds = _load(path, {"rows": [], "rejected": []})
+    rid = "ap-" + hashlib.sha1(f"{date}|{desc}|{amt}".encode()).hexdigest()[:10]
+    if any(r.get("id") == rid for r in adds["rows"]):
+        raise ValueError("That bill is already recorded.")
+    adds["rows"].append({"date": date.isoformat(), "account": acct, "type": "Expense", "category": cat, "desc": desc,
+                         "in": 0.0, "out": amt, "shared": "Y" if row.get("shared", True) else "N", "paid_by": "",
+                         "status": "Due", "notes": str(row.get("notes", ""))[:300], "id": rid,
+                         "approved": dt.date.today().isoformat()})
+    _save(path, adds)
+    return rid
+
+
 def decide(folder, ids, approve, ddir=None, edits=None):
     """Approve (moves to apex-ledger-adds.json) or reject proposals. `edits` {id: {field: value}} lets Adeel fix a row first."""
     inbox = load_proposals(folder, ddir)

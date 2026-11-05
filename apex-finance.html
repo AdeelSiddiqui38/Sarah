@@ -169,6 +169,18 @@ function render(d) {
     irows.length ? [table(['', 'File', 'Vendor', 'Invoice date', 'Total'], irows, [4]), h('div', {class: 'row', style: 'margin-top:10px'}, fileBtn)] : h('div', {class: 'sub'}, 'Inbox is empty.'),
     (vi.vendors || []).length ? [h('div', {style: 'height:8px'}), table(['Vendor folder', 'Files', 'Latest month'], vi.vendors.map(v => [v.vendor, String(v.files), v.latest]), [1])] : null));
 
+  // add an unpaid bill
+  const pf = {};
+  const fld = (k, label, attrs) => { pf[k] = h('input', Object.assign({'aria-label': label, placeholder: label}, attrs || {})); return pf[k]; };
+  app.append(panel('Add an unpaid bill (accounts payable)',
+    h('div', {class: 'sub'}, 'Records it in the ledger as Due. Nothing is paid; the bank balance does not change until the payment shows on a statement.'),
+    h('div', {class: 'row', style: 'margin:8px 0;flex-wrap:wrap;gap:8px'},
+      fld('date', 'Invoice date', {type: 'date'}), fld('desc', 'Vendor and invoice no.'), fld('category', 'Category (e.g. Gym Fit-Out)'), fld('amount', 'Total incl. GST', {type: 'number', step: '0.01'}),
+      h('button', {type: 'button', onclick: async () => {
+        try { render(await api('POST', '/api/apex/payable', {date: pf.date.value, desc: pf.desc.value, category: pf.category.value, amount: pf.amount.value, account: 'OpCo', shared: true})); }
+        catch (e) { alert(e.message); }
+      }}, 'Add as Due'))));
+
   // info@ mailbox (read-only)
   const mailBox = h('div', {}, h('div', {class: 'sub'}, 'Loading mailbox…'));
   app.append(panel('Mailbox: info@apex-physio.ca', mailBox));
