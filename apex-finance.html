@@ -71,6 +71,18 @@ async function api(method, url, body) {
   if (!r.ok) throw new Error(j.error || 'Something went wrong.');
   return j;
 }
+function renderMail(box, m) {
+  box.replaceChildren();
+  if (!m.configured) { box.append(h('div', {class: 'note'}, `Not connected yet. Add the mailbox password to Sarah on the NAS (SARAH_APEX_MAIL_PASS), then restart her. Sarah will only read ${m.user}; she never sends, moves or deletes mail.`)); return; }
+  const btn = h('button', {type: 'button', onclick: async () => { btn.disabled = true; btn.textContent = 'Checking…'; try { renderMail(box, await api('POST', '/api/apex/mail-check')); } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Check mail now'; } }}, 'Check mail now');
+  box.append(h('div', {class: 'sub'}, `Read-only. Last checked ${m.checked || 'never'} (auto every 15 min). PDF/photo attachments are copied into the Vendor Invoices Inbox; mail itself is left untouched.`),
+    m.error ? h('div', {class: 'note'}, m.error) : null,
+    h('div', {class: 'row', style: 'margin:8px 0'}, btn),
+    m.messages.length ? table(['Date (UTC)', 'From', 'Subject', 'Files'], m.messages.map(x => [x.date, x.from, x.subject + (x.new ? '  (new)' : ''), String((x.attachments || []).length || '')]), [3]) : h('div', {class: 'sub'}, 'No mail read yet.'));
+}
+async function loadMail(box) {
+  try { renderMail(box, await api('GET', '/api/apex/mail')); } catch (e) { box.replaceChildren(h('div', {class: 'sub'}, 'Mailbox status unavailable.')); }
+}
 let DATA = null;
 function render(d) {
   DATA = d;
@@ -156,6 +168,11 @@ function render(d) {
     h('div', {class: 'row', style: 'margin:8px 0'}, up, upBtn),
     irows.length ? [table(['', 'File', 'Vendor', 'Invoice date', 'Total'], irows, [4]), h('div', {class: 'row', style: 'margin-top:10px'}, fileBtn)] : h('div', {class: 'sub'}, 'Inbox is empty.'),
     (vi.vendors || []).length ? [h('div', {style: 'height:8px'}), table(['Vendor folder', 'Files', 'Latest month'], vi.vendors.map(v => [v.vendor, String(v.files), v.latest]), [1])] : null));
+
+  // info@ mailbox (read-only)
+  const mailBox = h('div', {}, h('div', {class: 'sub'}, 'Loading mailbox…'));
+  app.append(panel('Mailbox: info@apex-physio.ca', mailBox));
+  loadMail(mailBox);
 
   // dormant account archive
   (d.archive || []).forEach(a => app.append(panel(`${a.account}: closed / dormant (archive)`,
