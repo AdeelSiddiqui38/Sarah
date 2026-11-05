@@ -196,10 +196,13 @@ def file_invoices(folder, items, ddir=None):
 
 
 def save_upload(folder, name, b64):
+    return save_upload_bytes(folder, name, base64.b64decode(b64, validate=False))
+
+
+def save_upload_bytes(folder, name, data):
     ext = Path(str(name)).suffix.lower()
     if ext not in EXTS:
         raise ValueError("Only PDF or photo files (jpg, png, heic, webp).")
-    data = base64.b64decode(b64, validate=False)
     if not data or len(data) > MAX_UPLOAD:
         raise ValueError("File is empty or larger than 25 MB.")
     ib = inbox(folder)

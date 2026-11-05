@@ -36,6 +36,7 @@ import marketing_agent
 import social_agent
 import apex_finance
 import apex_vendors
+import apex_mail
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -731,6 +732,10 @@ class H(BaseHTTPRequestHandler):
             except (OSError, ValueError, KeyError) as e:
                 audit("sarah", "apex_read_error", {"msg": str(e)[:200]})
                 return self.send(500, {"error": "Could not read the APEX Cost Controller or statements."})
+        if path == "/api/apex/mail":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            return self.send(200, apex_mail.summary(APEX_DATA_DIR))
         if path == "/api/state":
             return self.send(200, {"setup": bool(setting("pass_hash")), "authed": self.authed()})
         if not self.authed():
@@ -835,6 +840,18 @@ class H(BaseHTTPRequestHandler):
             except OSError as e:
                 audit("sarah", "apex_vendor_error", {"msg": str(e)[:200]})
                 return self.send(500, {"error": "Could not write to the Vendor Invoices folder on the NAS (is the writable folder mounted?)."})
+        if path == "/api/apex/mail-check":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            p = apex_project()
+            if not p:
+                return self.send(404, {"error": "Turn on the Finance agent for the APEX Physio project and set its folder."})
+            if not apex_mail.configured():
+                return self.send(400, {"error": "Mailbox password is not set on the server yet."})
+            with _apex_lock:
+                st = apex_mail.check(p["folder"], APEX_DATA_DIR)
+            audit("adeel", "apex_mail_check", {"new_files": st.get("new_files", 0), "ok": not st.get("error")})
+            return self.send(200, apex_mail.summary(APEX_DATA_DIR))
         if path in ("/api/apex/scan", "/api/apex/decide"):
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
@@ -1518,12 +1535,28 @@ def _task_loop():
         time.sleep(3600)
 
 
+def _mail_loop():
+    """Read-only check of the APEX info mailbox every 6 hours (only if a password is set)."""
+    while True:
+        time.sleep(6 * 3600)
+        try:
+            p = apex_project()
+            if p and apex_mail.configured():
+                with _apex_lock:
+                    st = apex_mail.check(p["folder"], APEX_DATA_DIR)
+                if st.get("new_files"):
+                    audit("sarah", "apex_mail_filed", {"files": st["new_files"]})
+        except Exception as e:  # keep the loop alive
+            audit("sarah", "apex_mail_error", {"msg": str(e)[:120]})
+
+
 def main():
     init_db()
     if HOST not in ("127.0.0.1", "localhost"):
         sys.exit("Refusing to listen outside this computer.")
     srv = ThreadingHTTPServer((HOST, PORT), H)
     threading.Thread(target=_task_loop, daemon=True).start()
+    threading.Thread(target=_mail_loop, daemon=True).start()
     print(f"Sarah Core online at http://{HOST}:{PORT}  (vault: {VAULT_KIND})", flush=True)
     try:
         srv.serve_forever()
