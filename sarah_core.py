@@ -840,6 +840,22 @@ class H(BaseHTTPRequestHandler):
             except OSError as e:
                 audit("sarah", "apex_vendor_error", {"msg": str(e)[:200]})
                 return self.send(500, {"error": "Could not write to the Vendor Invoices folder on the NAS (is the writable folder mounted?)."})
+        if path == "/api/apex/payable":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            p = apex_project()
+            if not p:
+                return self.send(404, {"error": "Turn on the Finance agent for the APEX Physio project and set its folder."})
+            try:
+                with _apex_lock:
+                    rid = apex_finance.add_payable(p["folder"], b, APEX_DATA_DIR)
+                audit("adeel", "apex_payable_added", {"id": rid})
+                return self.send(200, apex_finance.full(p["folder"], APEX_DATA_DIR))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except OSError as e:
+                audit("sarah", "apex_payable_error", {"msg": str(e)[:200]})
+                return self.send(500, {"error": "Could not write to Sarah Data on the NAS."})
         if path == "/api/apex/mail-check":
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
