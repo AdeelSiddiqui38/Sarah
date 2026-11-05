@@ -888,6 +888,30 @@ class H(BaseHTTPRequestHandler):
             except OSError as e:
                 audit("sarah", "apex_payable_error", {"msg": str(e)[:200]})
                 return self.send(500, {"error": "Could not write to Sarah Data on the NAS."})
+        if path in ("/api/apex/mail-draft", "/api/apex/mail-discard", "/api/apex/mail-send"):
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            try:
+                with _apex_lock:
+                    if path == "/api/apex/mail-draft":
+                        att = b.get("attach") if isinstance(b.get("attach"), list) else []
+                        rid = apex_mail.create_outbox(APEX_DATA_DIR, b.get("to"), b.get("cc"), b.get("subject"), b.get("body"),
+                                                      [a for a in att if isinstance(a, dict)], str(b.get("id") or "") or None)
+                        audit("adeel", "apex_mail_draft", {"id": rid})
+                    elif path == "/api/apex/mail-discard":
+                        apex_mail.discard_outbox(APEX_DATA_DIR, str(b.get("id", "")))
+                        audit("adeel", "apex_mail_discard", {"id": str(b.get("id", ""))[:12]})
+                    else:
+                        if b.get("approved") is not True:
+                            return self.send(400, {"error": "Approval is required to send."})
+                        it = apex_mail.send_outbox(APEX_DATA_DIR, str(b.get("id", "")))
+                        audit("adeel", "apex_mail_sent", {"id": it["id"], "to": it["to"], "cc": it["cc"], "subject": it["subject"][:80]})
+                return self.send(200, apex_mail.summary(APEX_DATA_DIR))
+            except ValueError as e:
+                audit("adeel", "apex_mail_error", {"msg": str(e)[:120]})
+                return self.send(400, {"error": str(e)})
+            except OSError:
+                return self.send(500, {"error": "Could not write to Sarah Data on the NAS."})
         if path == "/api/apex/mail-check":
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
