@@ -71,14 +71,45 @@ async function api(method, url, body) {
   if (!r.ok) throw new Error(j.error || 'Something went wrong.');
   return j;
 }
+function mailOutbox(box, m) {
+  const f = {};
+  const inp = (k, ph, attrs) => (f[k] = h('input', Object.assign({'aria-label': ph, placeholder: ph, style: 'width:100%'}, attrs || {})));
+  const body = (f.body = h('textarea', {rows: 6, style: 'width:100%', 'aria-label': 'Message', placeholder: 'Message'}));
+  const opts = [];
+  (m.messages || []).forEach(x => (x.attachments || []).forEach(a => opts.push({uid: x.uid, name: a, label: `${a}  (from "${x.subject.slice(0, 40)}", ${x.date.slice(0, 10)})`})));
+  const sel = (f.attach = h('select', {multiple: 'multiple', size: Math.min(4, Math.max(2, opts.length)), 'aria-label': 'Attach from inbox', style: 'width:100%'}, opts.map((o, i) => h('option', {value: String(i)}, o.label))));
+  const save = h('button', {type: 'button', onclick: async () => {
+    const attach = [...sel.selectedOptions].map(o => ({uid: opts[+o.value].uid, name: opts[+o.value].name}));
+    try { renderMail(box, await api('POST', '/api/apex/mail-draft', {to: f.to.value, cc: f.cc.value, subject: f.subject.value, body: body.value, attach})); } catch (e) { alert(e.message); }
+  }}, 'Save as draft');
+  const drafts = (m.outbox || []).map(it => {
+    const card = h('div', {class: 'note', style: 'margin:8px 0;white-space:pre-wrap'});
+    card.append(h('b', {}, `${it.status.toUpperCase()}: ${it.subject}`), `\nTo: ${it.to.join(', ')}${it.cc.length ? '   Cc: ' + it.cc.join(', ') : ''}\n${it.attach.length ? 'Attached: ' + it.attach.map(a => a.name).join(', ') + '\n' : ''}\n${it.body}`);
+    if (it.error) card.append(`\nLast error: ${it.error}`);
+    if (it.status === 'sent') { card.append(`\nSent ${it.sent}`); return card; }
+    const send = h('button', {type: 'button', onclick: async () => {
+      if (!confirm(`Send this email now from ${m.user}?\n\nTo: ${it.to.join(', ')}${it.cc.length ? '\nCc: ' + it.cc.join(', ') : ''}\nSubject: ${it.subject}${it.attach.length ? '\nAttached: ' + it.attach.map(a => a.name).join(', ') : ''}`)) return;
+      send.disabled = true; send.textContent = 'Sending…';
+      try { renderMail(box, await api('POST', '/api/apex/mail-send', {id: it.id, approved: true})); } catch (e) { alert(e.message); loadMail(box); }
+    }}, 'Approve & send');
+    const del = h('button', {type: 'button', onclick: async () => { try { renderMail(box, await api('POST', '/api/apex/mail-discard', {id: it.id})); } catch (e) { alert(e.message); } }}, 'Discard');
+    card.append(h('div', {class: 'row', style: 'margin-top:8px;gap:8px'}, send, del));
+    return card;
+  });
+  return h('div', {}, h('h3', {}, 'Send email (only after you approve)'),
+    h('div', {class: 'sub'}, `Nothing leaves until you press Approve & send on a saved draft. It is sent from ${m.user} and logged.`),
+    drafts, h('div', {style: 'display:grid;gap:6px;margin-top:8px'}, inp('to', 'To (comma separated)'), inp('cc', 'Cc'), inp('subject', 'Subject'), body,
+      opts.length ? h('div', {class: 'sub'}, 'Attach from inbox (Ctrl/Cmd-click for several)') : '', opts.length ? sel : '', h('div', {class: 'row'}, save)));
+}
 function renderMail(box, m) {
   box.replaceChildren();
-  if (!m.configured) { box.append(h('div', {class: 'note'}, `Not connected yet. Add the mailbox password to Sarah on the NAS (SARAH_APEX_MAIL_PASS), then restart her. Sarah will only read ${m.user}; she never sends, moves or deletes mail.`)); return; }
+  if (!m.configured) { box.append(h('div', {class: 'note'}, `Not connected yet. Add the mailbox password to Sarah on the NAS (SARAH_APEX_MAIL_PASS), then restart her. Sarah reads ${m.user} and sends only what you approve; she never moves or deletes mail.`)); return; }
   const btn = h('button', {type: 'button', onclick: async () => { btn.disabled = true; btn.textContent = 'Checking…'; try { renderMail(box, await api('POST', '/api/apex/mail-check')); } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Check mail now'; } }}, 'Check mail now');
-  box.append(h('div', {class: 'sub'}, `Read-only. Last checked ${m.checked || 'never'} (auto every 6 hours). PDF/photo attachments are copied into the Vendor Invoices Inbox; mail itself is left untouched.`),
+  box.append(h('div', {class: 'sub'}, `Reading is read-only: last checked ${m.checked || 'never'} (auto every 6 hours). PDF/photo attachments are copied into the Vendor Invoices Inbox; received mail is left untouched.`),
     m.error ? h('div', {class: 'note'}, m.error) : '',
     h('div', {class: 'row', style: 'margin:8px 0'}, btn),
-    m.messages.length ? table(['Date (UTC)', 'From', 'Subject', 'Files'], m.messages.map(x => [x.date, x.from, x.subject + (x.new ? '  (new)' : ''), String((x.attachments || []).length || '')]), [3]) : h('div', {class: 'sub'}, 'No mail read yet.'));
+    m.messages.length ? table(['Date (UTC)', 'From', 'Subject', 'Files'], m.messages.map(x => [x.date, x.from, x.subject + (x.new ? '  (new)' : ''), String((x.attachments || []).length || '')]), [3]) : h('div', {class: 'sub'}, 'No mail read yet.'),
+    mailOutbox(box, m));
 }
 async function loadMail(box) {
   try { renderMail(box, await api('GET', '/api/apex/mail')); } catch (e) { box.replaceChildren(h('div', {class: 'sub'}, 'Mailbox status unavailable.')); }
