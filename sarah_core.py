@@ -34,11 +34,14 @@ import invoice_match
 import wp_tools
 import marketing_agent
 import social_agent
+import apex_finance
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "sarah.db"
 UI_FILE = BASE_DIR / "sarah-grid.html"
+APEX_UI_FILE = BASE_DIR / "apex-finance.html"
+APEX_DATA_DIR = os.environ.get("SARAH_APEX_DATA_DIR")   # on the NAS: Finance/Sarah Data inside S:\APEX Physio (the one writable spot for APEX)
 LEDGER_DIR = Path(os.environ.get("SARAH_LEDGER_DIR", DATA_DIR / "ledger"))   # on the NAS: the Finance/Accounts folder on S:
 LEDGER_DATA = LEDGER_DIR / "ledger-data.json"
 WEBSITE_DIR = Path(os.environ.get("SARAH_WEBSITE_DIR", DATA_DIR / "website"))   # on the NAS: Remedy Pills/Branding & Marketing/Website on S:
@@ -479,6 +482,45 @@ def make_draft(p, agent, title, body, actor):
     return did
 
 
+# ------------------------------------------------------------------ APEX finance (Excel stays master; Sarah reads and proposes)
+_apex_lock = threading.Lock()
+
+
+def apex_project():
+    """The APEX project when it has a folder and the Finance agent on; otherwise None."""
+    for p in list_projects():
+        if re.search(r"apex", p["name"], re.I) and p.get("folder") and p["agents"].get("Finance"):
+            return p
+    return None
+
+
+def apex_job():
+    """Mondays: scan statements, save proposed ledger rows, and leave one draft per new reminder (draft-only)."""
+    today = datetime.now()
+    if today.weekday() != 0:
+        return
+    iso = today.isocalendar()
+    key = f"apex_job_{iso[0]}-W{iso[1]:02d}"
+    p = apex_project()
+    if not p or setting(key):
+        return
+    with _apex_lock:
+        scan = apex_finance.scan_statements(p["folder"], APEX_DATA_DIR)
+        try:
+            apex_finance.save_proposals(p["folder"], scan, APEX_DATA_DIR)
+        except OSError as e:
+            audit("sarah", "apex_save_error", {"msg": str(e)[:200]})
+        made = 0
+        for r in apex_finance.reminders(p["folder"], APEX_DATA_DIR, today.date(), scan):
+            if setting("apexrem_" + r["key"]):
+                continue
+            make_draft(p, "Finance", r["title"], r["body"], actor="sarah")
+            setting("apexrem_" + r["key"], now())
+            made += 1
+    setting(key, now())
+    audit("sarah", "apex_weekly", {"proposals": len(scan["proposals"]), "drafts": made})
+
+
 # ------------------------------------------------------------------ ledger (one home for the data)
 _ledger_lock = threading.Lock()
 
@@ -672,6 +714,22 @@ class H(BaseHTTPRequestHandler):
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
             return self.send(200, {"data": ledger_read()})
+        if path == "/apex-finance":
+            if not self.authed():
+                return self.send(302, raw=b"", headers={"Location": "/"})
+            audit("adeel", "apex_finance_open")
+            return self.send(200, raw=APEX_UI_FILE.read_bytes(), ctype="text/html; charset=utf-8")
+        if path == "/api/apex/finance":
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            p = apex_project()
+            if not p:
+                return self.send(404, {"error": "Turn on the Finance agent for the APEX Physio project and set its folder."})
+            try:
+                return self.send(200, apex_finance.full(p["folder"], APEX_DATA_DIR))
+            except (OSError, ValueError, KeyError) as e:
+                audit("sarah", "apex_read_error", {"msg": str(e)[:200]})
+                return self.send(500, {"error": "Could not read the APEX Cost Controller or statements."})
         if path == "/api/state":
             return self.send(200, {"setup": bool(setting("pass_hash")), "authed": self.authed()})
         if not self.authed():
@@ -752,6 +810,30 @@ class H(BaseHTTPRequestHandler):
                     return self.send(500, {"error": "Could not write the ledger data to the NAS."})
             audit("adeel", "ledger_save", {"keys": sorted(list(sets) + rms)})
             return self.send(200, {"ok": True})
+        if path in ("/api/apex/scan", "/api/apex/decide"):
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            p = apex_project()
+            if not p:
+                return self.send(404, {"error": "Turn on the Finance agent for the APEX Physio project and set its folder."})
+            try:
+                with _apex_lock:
+                    if path == "/api/apex/scan":
+                        scan = apex_finance.scan_statements(p["folder"], APEX_DATA_DIR)
+                        apex_finance.save_proposals(p["folder"], scan, APEX_DATA_DIR)
+                        audit("adeel", "apex_scan", {"proposals": len(scan["proposals"])})
+                    else:
+                        ids = b.get("ids")
+                        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+                            return self.send(400, {"error": "Bad request."})
+                        edits = b.get("edits") if isinstance(b.get("edits"), dict) else {}
+                        edits = {k: {f: str(v)[:200] for f, v in e.items() if f in ("type", "category")} for k, e in edits.items() if isinstance(e, dict)}
+                        n = apex_finance.decide(p["folder"], ids, bool(b.get("approve")), APEX_DATA_DIR, edits)
+                        audit("adeel", "apex_approve" if b.get("approve") else "apex_reject", {"rows": n})
+                return self.send(200, apex_finance.full(p["folder"], APEX_DATA_DIR))
+            except OSError as e:
+                audit("sarah", "apex_save_error", {"msg": str(e)[:200]})
+                return self.send(500, {"error": "Could not save to the APEX Finance data folder on the NAS."})
         if path == "/api/ledger/match":
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
@@ -1404,6 +1486,10 @@ def _task_loop():
             monthly_statements_task()
         except Exception as e:  # noqa: BLE001
             print("monthly task error:", e, flush=True)
+        try:
+            apex_job()
+        except Exception as e:  # noqa: BLE001
+            print("apex task error:", e, flush=True)
         time.sleep(3600)
 
 

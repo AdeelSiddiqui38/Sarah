@@ -355,6 +355,7 @@ function openProject(id){
       <p class="note">Your accountant reviews and files. Sarah prepares and flags what is missing.</p>`
       : `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>`}
     ${p.agents.Finance && /remedy/i.test(p.name) ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">Open ledger</a></div>` : ''}
+    ${p.agents.Finance && /apex/i.test(p.name) ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/apex-finance" target="_blank" rel="noopener" style="text-decoration:none">Open APEX Finance</a></div>` : ''}
     <form class="new" id="folderForm"><label for="pFolderEdit">Project folder (path on the NAS)<input id="pFolderEdit" type="text" value="${esc(p.folder || '')}" placeholder="/projects/Remedy Pills"></label>
       <div class="row"><button class="btn" type="submit">Save folder</button></div></form>
     <div class="row"><button class="btn ghost" type="button" id="rmBtn">Remove project</button></div>`);
