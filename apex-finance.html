@@ -76,7 +76,7 @@ function renderMail(box, m) {
   if (!m.configured) { box.append(h('div', {class: 'note'}, `Not connected yet. Add the mailbox password to Sarah on the NAS (SARAH_APEX_MAIL_PASS), then restart her. Sarah will only read ${m.user}; she never sends, moves or deletes mail.`)); return; }
   const btn = h('button', {type: 'button', onclick: async () => { btn.disabled = true; btn.textContent = 'Checking…'; try { renderMail(box, await api('POST', '/api/apex/mail-check')); } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Check mail now'; } }}, 'Check mail now');
   box.append(h('div', {class: 'sub'}, `Read-only. Last checked ${m.checked || 'never'} (auto every 6 hours). PDF/photo attachments are copied into the Vendor Invoices Inbox; mail itself is left untouched.`),
-    m.error ? h('div', {class: 'note'}, m.error) : null,
+    m.error ? h('div', {class: 'note'}, m.error) : '',
     h('div', {class: 'row', style: 'margin:8px 0'}, btn),
     m.messages.length ? table(['Date (UTC)', 'From', 'Subject', 'Files'], m.messages.map(x => [x.date, x.from, x.subject + (x.new ? '  (new)' : ''), String((x.attachments || []).length || '')]), [3]) : h('div', {class: 'sub'}, 'No mail read yet.'));
 }

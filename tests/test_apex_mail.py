@@ -49,4 +49,17 @@ class T(unittest.TestCase):
             self.assertIn("failed", apex_mail.check(f, d, boom)["error"])
             self.assertFalse(apex_mail.summary(d)["configured"])
 
+    def test_unwritable_folder_keeps_reading_and_retries(self):
+        with tempfile.TemporaryDirectory() as f, tempfile.TemporaryDirectory() as d:
+            orig = apex_vendors.save_upload_bytes
+            def boom(*a, **k): raise OSError("read-only")
+            apex_vendors.save_upload_bytes = boom
+            try:
+                st = apex_mail.check(f, d, lambda: FakeIMAP([mk("a"), mk("b", False)]))
+            finally:
+                apex_vendors.save_upload_bytes = orig
+            self.assertEqual(len(st["messages"]), 2); self.assertIn("not writable", st["error"]); self.assertEqual(st["new_files"], 0)
+            st2 = apex_mail.check(f, d, lambda: FakeIMAP([mk("a"), mk("b", False)]))
+            self.assertEqual(st2["new_files"], 1); self.assertIsNone(st2["error"])
+
 if __name__ == "__main__": unittest.main()

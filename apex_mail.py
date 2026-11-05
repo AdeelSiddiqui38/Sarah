@@ -95,6 +95,7 @@ def check(folder, ddir, imap_factory=None):
     seen = {m["mid"]: m for m in st.get("messages", [])}
     filed = set(st.get("filed", []))
     new_files = 0
+    save_err = None
     try:
         if imap_factory:
             M = imap_factory()
@@ -116,13 +117,18 @@ def check(folder, ddir, imap_factory=None):
                 if summ["mid"] in filed:
                     pass
                 else:
+                    ok = True
                     for fn, blob in atts:
                         try:
                             apex_vendors.save_upload_bytes(folder, f"{summ['from'] or 'mail'} {fn}", blob)
                             new_files += 1
-                        except (ValueError, OSError):
-                            raise
-                    filed.add(summ["mid"])
+                        except ValueError:
+                            pass  # unusable attachment (empty/too big): skip it
+                        except OSError:
+                            ok = False  # folder not writable yet: retry on the next check
+                            save_err = "Could not save attachments (the Vendor Invoices folder is not writable yet)."
+                    if ok:
+                        filed.add(summ["mid"])
                 summ["new"] = summ["mid"] not in seen
                 seen[summ["mid"]] = summ
         finally:
@@ -130,7 +136,7 @@ def check(folder, ddir, imap_factory=None):
                 M.logout()
             except Exception:
                 pass
-        st["error"] = None
+        st["error"] = save_err
     except (imaplib.IMAP4.error, OSError) as e:
         # message only, never the credentials
         st["error"] = "Mailbox check failed: " + str(e)[:120]
