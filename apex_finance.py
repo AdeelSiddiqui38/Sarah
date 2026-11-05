@@ -17,6 +17,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import apex_vendors
+
 try:  # in the container pdftext.py sits next to this file
     from pdftext import pdf_text
 except Exception:  # noqa: BLE001
@@ -97,6 +99,13 @@ def finance_dir(folder):
 
 def data_dir(folder, override=None):
     return Path(override) if override else finance_dir(folder) / "Sarah Data"
+
+
+def settings(folder, ddir=None):
+    """apex-settings.json in Sarah Data. HoldCo is dormant by default: the shop is bought and its account is not used any more."""
+    cfg = _load(data_dir(folder, ddir) / "apex-settings.json", {})
+    dormant = cfg.get("dormant", ["HoldCo"])
+    return {"dormant": [d for d in dormant if isinstance(d, str)]}
 
 
 def _load(path, default):
@@ -437,7 +446,10 @@ def scan_statements(folder, ddir=None):
     for lst in coverage.values():
         lst.sort(key=lambda x: x["period_end"])
     proposals.sort(key=lambda p: (p["date"], p["account"]))
-    return {"coverage": coverage, "balances": balances, "proposals": proposals, "scanned": dt.datetime.now().isoformat(timespec="seconds")}
+    dormant = settings(folder, ddir)["dormant"]
+    return {"coverage": coverage, "balances": balances, "proposals": [p for p in proposals if p["account"] not in dormant],
+            "dormant": dormant, "dormant_new": sum(1 for p in proposals if p["account"] in dormant),
+            "scanned": dt.datetime.now().isoformat(timespec="seconds")}
 
 
 def reconcile(folder, ddir=None, scan=None):
@@ -446,9 +458,25 @@ def reconcile(folder, ddir=None, scan=None):
     rows = all_rows(folder, ddir)
     out = []
     for acct, b in scan["balances"].items():
+        if acct in scan.get("dormant", []):
+            continue
         led = round(sum(cash_effect(r) for r in rows if r["account"] == acct and r["date"] and r["date"] <= b["date"]), 2)
         out.append({"account": acct, "through": b["date"], "statement": b["balance"], "ledger": led,
                     "difference": round(b["balance"] - led, 2) if b["balance"] is not None else None})
+    return out
+
+
+def archive(scan, rows):
+    """Dormant accounts (HoldCo): final balance and history only. No alerts, no reminders."""
+    out = []
+    for acct in scan.get("dormant", []):
+        cov = scan["coverage"].get(acct, [])
+        b = scan["balances"].get(acct)
+        led = round(sum(cash_effect(r) for r in rows if r["account"] == acct and (not b or (r["date"] and r["date"] <= b["date"]))), 2)
+        out.append({"account": acct, "statements": len(cov), "first": cov[0]["start"] if cov else "", "last": cov[-1]["period_end"] if cov else "",
+                    "final_balance": b["balance"] if b else None, "ledger": led,
+                    "difference": round(b["balance"] - led, 2) if b and b["balance"] is not None else None,
+                    "new_activity": scan.get("dormant_new", 0)})
     return out
 
 
@@ -459,6 +487,8 @@ def missing_statements(scan, today=None):
     last = first_of - dt.timedelta(days=1) if today.day >= 10 else (first_of - dt.timedelta(days=1)).replace(day=1) - dt.timedelta(days=1)
     out = {}
     for acct, files in scan["coverage"].items():
+        if acct in scan.get("dormant", []):
+            continue
         have = set()
         for f in files:
             y, m = map(int, f["start"][:7].split("-"))
@@ -535,12 +565,14 @@ def _invoice_total(text):
 
 def scan_invoices(folder):
     out = []
-    for d in INVOICE_DIRS:
-        base = Path(folder) / d
+    vroot = apex_vendors.root(folder)
+    for d in INVOICE_DIRS + (apex_vendors.DIRNAME,):
+        base = vroot if d == apex_vendors.DIRNAME else Path(folder) / d
         if not base.is_dir():
             continue
         for f in base.rglob("*.pdf"):
-            if not re.search(r"(?i)\binv|invoice|ord\d|receipt", f.name) or "_to_delete" in f.parts:
+            vendor_file = d == apex_vendors.DIRNAME
+            if (not vendor_file and not re.search(r"(?i)\binv|invoice|ord\d|receipt", f.name)) or "_to_delete" in f.parts:
                 continue
             try:
                 text = pdf_text(str(f))
@@ -548,7 +580,7 @@ def scan_invoices(folder):
                 text = ""
             tot = _invoice_total(text)
             dm = re.search(r"(?i)(?:invoice date|date)[:\s]+([A-Za-z]{3,9}\.? \d{1,2},? \d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4})", text)
-            out.append({"file": f.name, "path": str(f.relative_to(folder)), "total": tot, "date_text": dm.group(1) if dm else ""})
+            out.append({"file": f.name, "path": str(f.relative_to(base if d == apex_vendors.DIRNAME else folder)), "total": tot, "date_text": dm.group(1) if dm else ""})
     return out
 
 
@@ -647,9 +679,14 @@ def overview(folder, ddir=None):
     summ = summarize(folder, ddir)
     scan = scan_statements(folder, ddir) if summ["found"] else {"coverage": {}, "balances": {}, "proposals": [], "scanned": ""}
     inbox = load_proposals(folder, ddir)
-    return {"summary": summ, "statements": {"coverage": scan["coverage"], "balances": scan["balances"],
-                                            "missing": missing_statements(scan), "reconcile": reconcile(folder, ddir, scan)},
-            "proposals": inbox["proposals"] or scan["proposals"], "scanned": inbox.get("scanned") or scan["scanned"]}
+    dormant = scan.get("dormant", [])
+    live = lambda d: {k: v for k, v in d.items() if k not in dormant}    # noqa: E731
+    props = [p for p in (inbox["proposals"] or scan["proposals"]) if p.get("account") not in dormant]
+    return {"summary": summ, "dormant": dormant,
+            "statements": {"coverage": live(scan["coverage"]), "balances": live(scan["balances"]),
+                           "missing": missing_statements(scan), "reconcile": reconcile(folder, ddir, scan)},
+            "archive": archive(scan, all_rows(folder, ddir)),
+            "proposals": props, "scanned": inbox.get("scanned") or scan["scanned"]}
 
 
 def full(folder, ddir=None, today=None):
@@ -657,6 +694,11 @@ def full(folder, ddir=None, today=None):
     out = overview(folder, ddir)
     out["invoices"] = match_invoices(folder, ddir)
     out["reminders"] = reminders(folder, ddir, today, matches=out["invoices"])
+    out["vendors"] = apex_vendors.overview(folder, ddir)
+    n = len(out["vendors"]["inbox"])
+    if n:
+        out["reminders"].append({"key": f"apex_inbox_{n}_{(today or dt.date.today()).isocalendar()[1]}", "title": f"APEX: {n} vendor invoice(s) waiting in the Inbox",
+                                 "body": "Open the APEX Finance page > Vendor invoices, check the vendor, and approve to file them."})
     con = out["summary"].get("construction") or {}
     for it in con.get("items", []):
         m = re.search(r"Milestone\s+(\d+)", it["desc"])

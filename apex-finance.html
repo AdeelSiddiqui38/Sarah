@@ -53,7 +53,7 @@ const money = n => (n == null ? '–' : (n < 0 ? '-$' : '$') + Math.abs(n).toLoc
 function h(tag, attrs, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e[k] = v; else if (v !== false && v != null) e.setAttribute(k, v); }
-  for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
   return e;
 }
 const card = (k, v, cls, sub) => h('div', {class: 'card'}, h('div', {class: 'k'}, k), h('div', {class: 'v ' + (cls || '')}, v), sub ? h('div', {class: 'sub'}, sub) : null);
@@ -91,7 +91,7 @@ function render(d) {
   app.append(h('div', {class: 'grid'},
     card('Funds in', money(k.funds_in), '', `Capital ${money(k.capital_in)} · Loans ${money(k.loan_in)}`),
     card('Spent', money(k.spent), '', `Property ${money(k.property)} · Other ${money(k.expenses)}`),
-    card('Bank balance (statements)', money(bank), 'good', 'HoldCo + OpCo, latest statements'),
+    card('OpCo bank balance', money(bank), 'good', 'Latest OpCo statement'),
     card('Cash per ledger', money(k.cash_on_hand)),
     card('Still to settle', money(k.to_settle), k.to_settle > 0 ? 'warn' : 'good', `Due invoices ${money(k.unpaid_invoices)} · Owed to Adeel ${money(k.owed_adeel)} · Zara ${money(k.owed_zara)}`),
     card('BMO credit available', money(li), '', 'Uncommitted facilities, 75% of pre-tax invoices')));
@@ -118,9 +118,50 @@ function render(d) {
 
   // reconcile + coverage
   const rec = d.statements.reconcile || [];
-  app.append(panel('Ledger vs bank statements', table(['Account', 'Through', 'Statement', 'Ledger', 'Difference', ''],
+  app.append(panel('OpCo: ledger vs bank statements', table(['Account', 'Through', 'Statement', 'Ledger', 'Difference', ''],
     rec.map(r => [r.account, r.through, money(r.statement), money(r.ledger), money(r.difference), r.difference === 0 ? pill('ties', 'good') : pill('check', 'bad')]), [2, 3, 4]),
     h('div', {class: 'note'}, Object.entries(d.statements.coverage || {}).map(([a, f]) => `${a}: ${f.length} statement(s), ${f[0].start} to ${f[f.length - 1].period_end}`).join('  ·  '))));
+
+  // vendor invoices (inbox -> per-vendor folders)
+  const vi = d.vendors || {inbox: [], vendors: [], known: []};
+  const dl = h('datalist', {id: 'vendors'}, (vi.known || []).map(v => h('option', {value: v})));
+  const up = h('input', {type: 'file', multiple: 'multiple', accept: '.pdf,.jpg,.jpeg,.png,.heic,.webp,application/pdf,image/*', id: 'upfile'});
+  const upBtn = h('button', {type: 'button', onclick: async () => {
+    const files = [...up.files]; if (!files.length) return;
+    upBtn.disabled = true;
+    try {
+      let last = null;
+      for (const f of files) {
+        const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(f); });
+        last = await api('POST', '/api/apex/upload', {name: f.name, data});
+      }
+      if (last) render(last);
+    } catch (e) { alert(e.message); }
+    upBtn.disabled = false;
+  }}, 'Upload to Inbox');
+  const vsel = new Set((vi.inbox || []).filter(x => x.vendor).map(x => x.id));
+  const irows = (vi.inbox || []).map(x => {
+    const cb = h('input', {type: 'checkbox', 'aria-label': 'Select invoice', checked: x.vendor ? 'checked' : null, onchange: e => e.target.checked ? vsel.add(x.id) : vsel.delete(x.id)});
+    const vend = h('input', {list: 'vendors', 'data-vf': 'vendor', 'data-id': x.id, value: x.vendor, placeholder: 'Vendor', onchange: e => e.target.value ? vsel.add(x.id) : null});
+    const dat = h('input', {type: 'date', 'data-vf': 'date', 'data-id': x.id, value: x.date});
+    return [cb, x.file + (x.kind === 'photo' ? '  (photo, pick vendor)' : ''), vend, dat, x.total != null ? money(x.total) : '–'];
+  });
+  const fileBtn = h('button', {type: 'button', onclick: async () => {
+    const items = [...vsel].map(id => { const g = f => (document.querySelector(`[data-vf="${f}"][data-id="${id}"]`) || {}).value || ''; return {id, vendor: g('vendor'), date: g('date')}; }).filter(i => i.vendor);
+    if (!items.length) { alert('Pick a vendor for the selected invoices first.'); return; }
+    try { render(await api('POST', '/api/apex/file', {items})); } catch (e) { alert(e.message); }
+  }}, 'File selected');
+  app.append(panel('Vendor invoices', dl,
+    h('div', {class: 'sub'}, `Everything that arrives goes into one Inbox (S:\\APEX Physio\\${vi.path || 'Vendor Invoices\\Inbox'}). Drop files there from your phone or upload here. Sarah suggests the vendor; you approve and she files each one under Vendor Invoices\\<Vendor>\\<month>. Nothing is paid or deleted.`),
+    h('div', {class: 'row', style: 'margin:8px 0'}, up, upBtn),
+    irows.length ? [table(['', 'File', 'Vendor', 'Invoice date', 'Total'], irows, [4]), h('div', {class: 'row', style: 'margin-top:10px'}, fileBtn)] : h('div', {class: 'sub'}, 'Inbox is empty.'),
+    (vi.vendors || []).length ? [h('div', {style: 'height:8px'}), table(['Vendor folder', 'Files', 'Latest month'], vi.vendors.map(v => [v.vendor, String(v.files), v.latest]), [1])] : null));
+
+  // dormant account archive
+  (d.archive || []).forEach(a => app.append(panel(`${a.account}: closed / dormant (archive)`,
+    h('div', {class: 'sub'}, 'Read-only history. No reminders or alerts for this account. Change it back in Sarah Data\\apex-settings.json if it becomes active again.'),
+    table(['Final balance', 'Through', 'Statements', 'Ledger', 'Difference'], [[money(a.final_balance), a.last || '–', `${a.statements} (${a.first || '–'} to ${a.last || '–'})`, money(a.ledger), money(a.difference)]], [0, 3, 4]),
+    a.new_activity ? h('div', {class: 'note'}, `${a.new_activity} new statement line(s) appeared on this dormant account. Check the bank if you did not expect them.`) : null)));
 
   // construction
   const c = s.construction || {};

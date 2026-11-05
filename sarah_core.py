@@ -35,6 +35,7 @@ import wp_tools
 import marketing_agent
 import social_agent
 import apex_finance
+import apex_vendors
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -788,7 +789,7 @@ class H(BaseHTTPRequestHandler):
         if not self.same_origin():
             return self.send(403, {"error": "Blocked by the shield."})
         try:
-            b = self.body(limit=8_000_000 if path == "/api/ledger-data" else 200_000)
+            b = self.body(limit=8_000_000 if path == "/api/ledger-data" else 36_000_000 if path == "/api/apex/upload" else 200_000)
         except (ValueError, json.JSONDecodeError):
             return self.send(400, {"error": "Bad request."})
         if path == "/api/ledger-data":
@@ -810,6 +811,30 @@ class H(BaseHTTPRequestHandler):
                     return self.send(500, {"error": "Could not write the ledger data to the NAS."})
             audit("adeel", "ledger_save", {"keys": sorted(list(sets) + rms)})
             return self.send(200, {"ok": True})
+        if path in ("/api/apex/upload", "/api/apex/file"):
+            if not self.authed():
+                return self.send(401, {"error": "Log in first."})
+            p = apex_project()
+            if not p:
+                return self.send(404, {"error": "Turn on the Finance agent for the APEX Physio project and set its folder."})
+            try:
+                with _apex_lock:
+                    if path == "/api/apex/upload":
+                        name = apex_vendors.save_upload(p["folder"], str(b.get("name", "")), str(b.get("data", "")))
+                        audit("adeel", "apex_invoice_upload", {"file": name})
+                    else:
+                        items = b.get("items")
+                        if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
+                            return self.send(400, {"error": "Bad request."})
+                        items = [{"id": str(i.get("id", ""))[:20], "vendor": str(i.get("vendor", ""))[:80], "date": str(i.get("date", ""))[:10]} for i in items][:100]
+                        n = apex_vendors.file_invoices(p["folder"], items, APEX_DATA_DIR)
+                        audit("adeel", "apex_invoice_filed", {"files": n})
+                return self.send(200, apex_finance.full(p["folder"], APEX_DATA_DIR))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            except OSError as e:
+                audit("sarah", "apex_vendor_error", {"msg": str(e)[:200]})
+                return self.send(500, {"error": "Could not write to the Vendor Invoices folder on the NAS (is the writable folder mounted?)."})
         if path in ("/api/apex/scan", "/api/apex/decide"):
             if not self.authed():
                 return self.send(401, {"error": "Log in first."})
