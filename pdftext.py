@@ -3,6 +3,7 @@ Uses `pdftotext` when it exists; otherwise decodes Flate streams and maps glyph 
 Best effort: returns "" when it cannot read a file."""
 import re
 import shutil
+import os
 import subprocess
 import zlib
 
@@ -90,7 +91,24 @@ def _builtin(data):
     return "".join(out)
 
 
+_CACHE = {}
+
+
 def pdf_text(path):
+    """Text of a PDF, cached by (path, size, mtime) so repeated page loads do not re-read big files."""
+    try:
+        st = os.stat(path)
+        key = (str(path), st.st_size, st.st_mtime_ns)
+    except OSError:
+        return ""
+    if key not in _CACHE:
+        if len(_CACHE) > 300:
+            _CACHE.clear()
+        _CACHE[key] = _pdf_text(path)
+    return _CACHE[key]
+
+
+def _pdf_text(path):
     exe = shutil.which("pdftotext")
     if exe:
         try:
