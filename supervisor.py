@@ -72,7 +72,11 @@ def _luhn(digits):
     return s % 10 == 0
 
 
+DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+
+
 def _has_card(text):
+    text = DATE.sub(" ", text)  # ISO dates side by side ("2026-10-01 2026-10-31") are not card numbers
     for m in CARD.finditer(text):
         digits = re.sub(r"\D", "", m.group())
         if 13 <= len(digits) <= 19 and _luhn(digits):

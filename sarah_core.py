@@ -1276,14 +1276,17 @@ class H(BaseHTTPRequestHandler):
             q("UPDATE alerts SET acked=? WHERE ref=? AND acked IS NULL", (now(), f"question:{qq['id']}"))
             audit("adeel", "question_answered", {"question": qq["id"], "answer": ans[:200]}, company=qq["company"])
             return self.send(200, {"ok": True})
-        m = re.fullmatch(r"/api/drafts/(\d+)/release", path)
+        m = re.fullmatch(r"/api/drafts/(\d+)/(release|discard)", path)
         if m:
             d = q("SELECT d.*, p.name AS project FROM drafts d LEFT JOIN projects p ON p.id=d.project_id WHERE d.id=? AND status='held'", (int(m.group(1)),), one=True)
             if not d:
                 return self.send(404, {"error": "That draft is not on hold."})
-            q("UPDATE drafts SET status='pending' WHERE id=?", (d["id"],))
+            st = "pending" if m.group(2) == "release" else "rejected"
+            q("UPDATE drafts SET status=?, decided=?, decided_by=? WHERE id=?",
+              (st, None if st == "pending" else now(), None if st == "pending" else "adeel", d["id"]))
             q("UPDATE alerts SET acked=? WHERE ref=? AND acked IS NULL", (now(), f"draft:{d['id']}"))
-            audit("adeel", "draft_released", {"draft": d["id"], "project": d["project"], "title": d["title"]})
+            audit("adeel", "draft_released" if st == "pending" else "draft_rejected",
+                  {"draft": d["id"], "project": d["project"], "title": d["title"], "held": True})
             return self.send(200, {"ok": True})
         m = re.fullmatch(r"/api/drafts/(\d+)/(approve|reject)", path)
         if m:
@@ -1379,7 +1382,8 @@ def monthly_statements_task():
         return
     setting(key, now())
     for p in list_projects():
-        if not (p.get("folder") and p["agents"].get("Finance")):
+        # Remedy Pills only: these reminders name Remedy folders and mailboxes (P1). APEX has its own apex_job.
+        if not (p.get("folder") and p["agents"].get("Finance")) or supervisor.company_of(p["name"]) != "Remedy Pills":
             continue
         items = checklist(p)["items"]
         gaps = [(i["item"], i["missing"]) for i in items[:2] if i.get("missing")]
@@ -1387,7 +1391,7 @@ def monthly_statements_task():
             continue
         month = MONTHS[(today.month - 2) % 12].title()
         title = f"Monthly: download {month} bank and Mastercard statements"
-        if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+        if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (p["id"], title), one=True):
             continue
         lines = [f"- {name}: missing {', '.join(m)}" for name, m in gaps]
         body = ("Monthly statement check for " + p["name"] + ".\n" + "\n".join(lines) +
@@ -1414,7 +1418,8 @@ def weekly_invoice_task():
         return
     setting(key, now())
     for p in list_projects():
-        if not (p.get("folder") and p["agents"].get("Finance")):
+        # Remedy Pills only: these reminders name Remedy folders and mailboxes (P1). APEX has its own apex_job.
+        if not (p.get("folder") and p["agents"].get("Finance")) or supervisor.company_of(p["name"]) != "Remedy Pills":
             continue
         folder = os.path.join(str(p["folder"]), *INVOICE_SUBPATH)
         count, latest = 0, ""
@@ -1426,7 +1431,7 @@ def weekly_invoice_task():
         except OSError:
             pass
         title = f"Weekly: download pharmacist (Nayel Anwer) invoice, week of {today.strftime('%b %d')}"
-        if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+        if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (p["id"], title), one=True):
             continue
         body = ("Weekly invoice check for " + p["name"] + ".\n"
                 f"Saved so far: {count} invoice file(s)" + (f"; newest saved: {latest}" if latest else "") + ".\n\n"
@@ -1626,7 +1631,7 @@ def fetch_invoices(days=None):
         for p in list_projects():
             if p.get("folder") and p["agents"].get("Finance"):
                 title = "New invoice sender(s) to review: " + ", ".join(senders)[:120]
-                if not q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+                if not q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (p["id"], title), one=True):
                     lines = [f"- {u['sender']}: {u['subject']} ({', '.join(u['files'])})" for u in result["unknown"]]
                     make_draft(p, "Finance", title, "These senders are not set up as vendors yet. Files are parked in "
                                "Finance\\Invoices\\_Inbox\\<sender>.\n" + "\n".join(lines) +
@@ -1699,7 +1704,7 @@ def monthly_invoice_job():
             for p in list_projects():
                 if p.get("folder") and p["agents"].get("Finance"):
                     title = f"Missing: {v['name']} invoice for {today.strftime('%B %Y')}"
-                    if not q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+                    if not q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (p["id"], title), one=True):
                         make_draft(p, "Finance", title, f"I checked remedypillspharmacy@gmail.com on the 3rd and again on the 10th "
                                    f"and found no new invoice from {v['sender']}. Check if it was sent from another address "
                                    "or ask them to resend. I will keep catching it on the weekly Tuesday check.", actor="sarah")
@@ -1727,7 +1732,7 @@ def run_marketing(p, actor="sarah"):
         setting("gbp_posting") != "ok", banner, pending)
     week = datetime.now() - timedelta(days=datetime.now().weekday())
     title = f"Weekly marketing brief, week of {week.strftime('%b %d')}"
-    if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+    if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (p["id"], title), one=True):
         return {"ok": True, "note": "This week's brief is already waiting for approval."}
     did = make_draft(p, "Marketing", title, body, actor=actor)
     audit(actor, "marketing_brief", {"project": p["name"], "draft": did,
@@ -1762,7 +1767,7 @@ def run_social(p, actor="sarah"):
     body = social_agent.build_brief(pillar, label, posts, flags, setting("gbp_posting") != "ok", today)
     week = today - timedelta(days=today.weekday())
     title = f"Weekly social drafts, week of {week.strftime('%b %d')}"
-    if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status='pending'", (p["id"], title), one=True):
+    if q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (p["id"], title), one=True):
         return {"ok": True, "note": "This week's social drafts are already waiting for approval."}
     did = make_draft(p, "Social media", title, body, actor=actor)
     audit(actor, "social_drafts", {"project": p["name"], "draft": did, "topic": label, "flags": flags})

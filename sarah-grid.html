@@ -447,7 +447,7 @@ async function loadSup(){
       <div class="row"><input type="text" data-ansin="${x.id}" placeholder="Your answer" style="flex:1"><button class="btn amber" type="button" data-ans="${x.id}">Answer</button></div></div>`));
     c.held.forEach(h => { let issues = []; try { issues = JSON.parse(h.review || '{}').issues || []; } catch (e) {}
       cards.push(`<div class="card"><div class="h">HELD BY SUPERVISOR · ${esc(c.company)} · ${esc(h.agent)}</div><p><b>${esc(h.title)}</b></p><p class="note">${esc(issues.map(i => i.msg).join(' '))}</p><div class="draft-body">${esc(h.body)}</div>
-      <div class="row"><button class="btn ghost" type="button" data-rel="${h.id}">Release to queue</button></div></div>`); });
+      <div class="row"><button class="btn ghost" type="button" data-rel="${h.id}">Release to queue</button><button class="btn ghost" type="button" data-dis="${h.id}">Discard</button></div></div>`); });
     c.alerts.filter(a => a.kind !== 'question' && a.kind !== 'draft_held').forEach(a => cards.push(`<div class="card"><div class="h">ALERT · ${esc(c.company)}</div><p>${esc(a.msg)}</p>
       <div class="row"><button class="btn ghost" type="button" data-ack="${a.id}">Dismiss</button></div></div>`));
   });
@@ -455,6 +455,7 @@ async function loadSup(){
   el.innerHTML = cards.length ? cards.join('') : '<p class="note">No alerts. ' + d.companies.map(c => esc(c.company) + ': ' + c.agents.filter(a => a.on).length + ' agents on').join(' · ') + '</p>';
   el.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => supAct(`/api/alerts/${b.dataset.ack}/ack`, {}));
   el.querySelectorAll('[data-rel]').forEach(b => b.onclick = () => supAct(`/api/drafts/${b.dataset.rel}/release`, {}));
+  el.querySelectorAll('[data-dis]').forEach(b => b.onclick = () => supAct(`/api/drafts/${b.dataset.dis}/discard`, {}));
   el.querySelectorAll('[data-ans]').forEach(b => b.onclick = () => { const v = el.querySelector(`[data-ansin="${b.dataset.ans}"]`).value.trim(); if (v) supAct(`/api/questions/${b.dataset.ans}/answer`, { answer: v }); });
 }
 async function supAct(url, body){ try { await api('POST', url, body); sfx.click(); } catch (x) { say(x.message); } await Promise.all([loadSup(), loadDrafts(), loadAudit()]); }

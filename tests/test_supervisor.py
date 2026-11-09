@@ -42,6 +42,12 @@ class Rules(unittest.TestCase):
         self.assertFalse(sv.check_draft("APEX Physio", "", "x")["ok"])
         self.assertIn("no_company", [i["code"] for i in sv.check_draft(None, "a", "b")["issues"]])
 
+    def test_dates_are_not_cards(self):
+        for a in range(1, 13):
+            for d in range(1, 29):
+                txt = f"Statement period 2026-{a:02d}-{d:02d} 2026-10-31, invoice 674-10629"
+                self.assertTrue(sv.check_draft("Remedy Pills", "Statement", txt)["ok"], txt)
+
     def test_needs_adeel_flag(self):
         self.assertTrue(sv.check_draft("APEX Physio", "Pay Spartan", "Pay the invoice")["needs_adeel"])
         self.assertFalse(sv.check_draft("APEX Physio", "Note", "Ledger looks fine")["needs_adeel"])
@@ -105,6 +111,24 @@ class Wiring(unittest.TestCase):
         sc.q("UPDATE drafts SET created='2026-01-01T00:00:00+00:00' WHERE id=?", (did,))
         sc.stale_check(); sc.stale_check()
         self.assertEqual(sc.q("SELECT count(*) AS n FROM alerts WHERE kind='stale'", one=True)["n"], 1)
+
+    def test_remedy_reminders_skip_apex(self):
+        sc.monthly_statements_task.__globals__["datetime"]  # module loaded
+        import unittest.mock as um
+        from datetime import datetime as real
+        class FakeDT(real):
+            @classmethod
+            def now(cls, tz=None): return real(2026, 11, 20, 9, 0)
+        with um.patch.object(sc, "datetime", FakeDT), um.patch.object(sc, "checklist", lambda p: {"items": [{"item": "Bank", "missing": ["Oct"]}, {"item": "Card", "missing": ["Oct"]}]}):
+            sc.monthly_statements_task()
+        made = sc.q("SELECT p.name AS project, d.status FROM drafts d JOIN projects p ON p.id=d.project_id")
+        self.assertTrue(made)
+        self.assertTrue(all("Remedy" in m["project"] for m in made), made)
+
+    def test_held_draft_not_duplicated(self):
+        sc.q("UPDATE projects SET agents=? WHERE id=?", (json.dumps({"Marketing": 1}), self.remedy["id"]))
+        sc.make_draft(self.remedy, "Marketing", "Brief", "Mention apex-physio.ca", actor="sarah")
+        self.assertTrue(sc.q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (self.remedy["id"], "Brief"), one=True))
 
     def test_old_database_gets_new_columns(self):
         sc.CON.close()
