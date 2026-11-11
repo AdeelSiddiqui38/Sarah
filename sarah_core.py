@@ -60,7 +60,7 @@ HOST, PORT = "127.0.0.1", int(os.environ.get("SARAH_PORT", "8770"))
 SESSION_HOURS = 12
 MAX_FAILS, LOCK_SECONDS = 5, 300
 MAX_SLOTS = 8
-AGENTS = ["Finance", "Coordinator", "Administration", "Marketing", "Social media", "HR"]
+AGENTS = ["Finance", "Email", "Website", "Coordinator", "Administration", "Marketing", "Social media", "HR"]
 MODEL = os.environ.get("SARAH_MODEL", "claude-haiku-5-5")
 ANTHROPIC_URL = os.environ.get("SARAH_ANTHROPIC_URL", "https://api.anthropic.com/v1/messages")
 OPENAI_MODEL = os.environ.get("SARAH_OPENAI_MODEL", "gpt-6.1-terra")
@@ -652,7 +652,7 @@ def supervisor_view():
         c = supervisor.COMPANIES[company]
         out.append({
             "company": company, "project": p["name"],
-            "agents": [{"name": a, "role": r, "on": bool(p["agents"].get(a))} for a, r in c["agents"].items()],
+            "agents": [{"name": a, "role": c["agents"].get(a, ""), "on": bool(p["agents"].get(a))} for a in AGENTS],
             "alerts": q("SELECT * FROM alerts WHERE company=? AND acked IS NULL ORDER BY id DESC", (company,)),
             "questions": q("SELECT * FROM questions WHERE company=? ORDER BY status='open' DESC, id DESC LIMIT 20", (company,)),
             "held": q("SELECT id, agent, title, body, review, created FROM drafts WHERE project_id=? AND status='held' ORDER BY id", (p["id"],)),
@@ -1791,8 +1791,8 @@ def social_job():
 def _task_loop():
     """Every hour: each company's Supervisor runs its agents' scheduled jobs (P2), then checks for stale drafts."""
     jobs = [
-        ("Remedy Pills", "Invoices", "weekly invoice fetch", invoice_job),
-        ("Remedy Pills", "Invoices", "monthly vendor check", monthly_invoice_job),
+        ("Remedy Pills", "Finance", "weekly invoice fetch", invoice_job),
+        ("Remedy Pills", "Finance", "monthly vendor check", monthly_invoice_job),
         ("Remedy Pills", "Marketing", "weekly marketing brief", marketing_job),
         ("Remedy Pills", "Social media", "weekly social drafts", social_job),
         ("Remedy Pills", "Finance", "statement reminders", monthly_statements_task),
@@ -1832,7 +1832,8 @@ def _mail_loop():
         time.sleep(6 * 3600)
         try:
             p = apex_project()
-            if p and apex_mail.configured():
+            # The Email agent owns the mailbox (P2): no reading unless it is switched on for APEX
+            if p and p["agents"].get("Email") and apex_mail.configured():
                 with _apex_lock:
                     st = apex_mail.check(p["folder"], APEX_DATA_DIR)
                 if st.get("new_files"):
