@@ -180,6 +180,10 @@ body { margin: 0; }
       <div class="queue" id="queue"><p class="note">No drafts waiting.</p></div>
     </section>
     <section class="frame">
+      <h2 class="ttl">Supervisors <span class="note" id="supCount"></span></h2>
+      <div class="queue" id="sup"><p class="note">No alerts.</p></div>
+    </section>
+    <section class="frame">
       <h2 class="ttl">Morning brief</h2>
       <div id="brief"><p class="note">Loading.</p></div>
     </section>
@@ -267,7 +271,7 @@ $('gateForm').onsubmit = async e => {
 $('lockBtn').onclick = async () => { sfx.click(); try { await api('POST', '/api/logout', {}); } catch (e) {} location.reload(); };
 
 // ---------------- data -----------------------------------------------------------------------------------------
-async function refreshAll(){ await Promise.all([loadProjects(), loadDrafts(), loadAudit(), loadVault()]); }
+async function refreshAll(){ await Promise.all([loadProjects(), loadDrafts(), loadAudit(), loadVault(), loadSup()]); }
 async function loadProjects(){
   const d = await api('GET', '/api/projects'); projects = d.projects; SLOTS = d.slots; AGENTS = d.agents;
   renderSlots(); renderBrief();
@@ -280,7 +284,7 @@ async function loadVault(){
   $('brainState').textContent = v.brain === 'claude' ? 'Claude' : v.brain === 'openai' ? 'OpenAI' : 'Local only (add key)'; $('brainState').className = v.brain !== 'local' ? 'good' : 'warn';
   return v;
 }
-setInterval(() => { if ($('gate').hidden) { loadDrafts().catch(() => {}); loadAudit().catch(() => {}); } }, 15000);
+setInterval(() => { if ($('gate').hidden) { loadDrafts().catch(() => {}); loadAudit().catch(() => {}); loadSup().catch(() => {}); } }, 15000);
 
 // ---------------- three.js core ------------------------------------------------------------------------------------
 const stage = $('stage'), canvas = $('core');
@@ -436,6 +440,25 @@ async function decide(id, what){
   catch (x) { say(x.message); }
   await Promise.all([loadDrafts(), loadProjects(), loadAudit()]);
 }
+async function loadSup(){
+  const d = await api('GET', '/api/supervisor'); const el = $('sup'); const cards = [];
+  d.companies.forEach(c => {
+    c.questions.filter(x => x.status === 'open').forEach(x => cards.push(`<div class="card"><div class="h">QUESTION · ${esc(c.company)} · ${esc(x.agent || 'Supervisor')}</div><p><b>${esc(x.question)}</b></p>${x.context ? `<div class="draft-body">${esc(x.context)}</div>` : ''}
+      <div class="row"><input type="text" data-ansin="${x.id}" placeholder="Your answer" style="flex:1"><button class="btn amber" type="button" data-ans="${x.id}">Answer</button></div></div>`));
+    c.held.forEach(h => { let issues = []; try { issues = JSON.parse(h.review || '{}').issues || []; } catch (e) {}
+      cards.push(`<div class="card"><div class="h">HELD BY SUPERVISOR · ${esc(c.company)} · ${esc(h.agent)}</div><p><b>${esc(h.title)}</b></p><p class="note">${esc(issues.map(i => i.msg).join(' '))}</p><div class="draft-body">${esc(h.body)}</div>
+      <div class="row"><button class="btn ghost" type="button" data-rel="${h.id}">Release to queue</button><button class="btn ghost" type="button" data-dis="${h.id}">Discard</button></div></div>`); });
+    c.alerts.filter(a => a.kind !== 'question' && a.kind !== 'draft_held').forEach(a => cards.push(`<div class="card"><div class="h">ALERT · ${esc(c.company)}</div><p>${esc(a.msg)}</p>
+      <div class="row"><button class="btn ghost" type="button" data-ack="${a.id}">Dismiss</button></div></div>`));
+  });
+  $('supCount').textContent = d.open_alerts ? '· ' + d.open_alerts + ' open' : '';
+  el.innerHTML = cards.length ? cards.join('') : '<p class="note">No alerts. ' + d.companies.map(c => esc(c.company) + ': ' + c.agents.filter(a => a.on).length + ' agents on').join(' · ') + '</p>';
+  el.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => supAct(`/api/alerts/${b.dataset.ack}/ack`, {}));
+  el.querySelectorAll('[data-rel]').forEach(b => b.onclick = () => supAct(`/api/drafts/${b.dataset.rel}/release`, {}));
+  el.querySelectorAll('[data-dis]').forEach(b => b.onclick = () => supAct(`/api/drafts/${b.dataset.dis}/discard`, {}));
+  el.querySelectorAll('[data-ans]').forEach(b => b.onclick = () => { const v = el.querySelector(`[data-ansin="${b.dataset.ans}"]`).value.trim(); if (v) supAct(`/api/questions/${b.dataset.ans}/answer`, { answer: v }); });
+}
+async function supAct(url, body){ try { await api('POST', url, body); sfx.click(); } catch (x) { say(x.message); } await Promise.all([loadSup(), loadDrafts(), loadAudit()]); }
 function renderBrief(){
   const rows = [];
   projects.forEach(p => {
