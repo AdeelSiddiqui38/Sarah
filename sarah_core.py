@@ -75,6 +75,9 @@ OPENAI_MODEL = os.environ.get("SARAH_OPENAI_MODEL", "gpt-6.1-terra")
 OPENAI_URL = os.environ.get("SARAH_OPENAI_URL", "https://api.openai.com/v1/responses")
 DOCS = Path(os.environ.get("SARAH_PROJECTS_ROOT", Path.home() / "Documents"))
 # Extra page origins allowed to make changes, e.g. https://sarah.your-tailnet.ts.net (comma separated)
+# Trading Command Center hub (Slot 03, NAS app trading-hub). Sarah proxies its dashboard at /trading/ for logged-in users.
+TRADING_HUB_URL = os.environ.get("SARAH_TRADING_HUB", "http://10.0.0.110:7777").rstrip("/")
+TRADING_BLOCKED = ("/secrets", "/api/secrets", "/api/shutdown", "/api/sync")  # keys page and hub controls stay LAN-only
 EXTRA_ORIGINS = [o.strip().rstrip("/") for o in os.environ.get("SARAH_ORIGINS", "").split(",") if o.strip()]
 # When set, only these Tailscale logins may use Sarah (checked from Tailscale Serve identity headers)
 ALLOWED_USERS = [u.strip().lower() for u in os.environ.get("SARAH_ALLOWED_USERS", "").split(",") if u.strip()]
@@ -883,6 +886,35 @@ class H(BaseHTTPRequestHandler):
         # Only the Sarah page itself may change things (blocks other sites and stray scripts).
         return self.headers.get("X-Sarah") == "1" and self.headers.get("Origin") in (None, f"http://{HOST}:{PORT}", f"http://localhost:{PORT}", *EXTRA_ORIGINS)
 
+    def trading_proxy(self, method):
+        """Command Center dashboard through Sarah: logged-in only, keys page and hub shutdown/sync blocked."""
+        full = self.path
+        sub = full[len("/trading"):]
+        if sub in ("", "?") or sub.startswith("?"):
+            return self.send(302, raw=b"", headers={"Location": "/trading/"})
+        if not self.authed():
+            return self.send(302, raw=b"", headers={"Location": "/"}) if method == "GET" else self.send(401, {"error": "Log in first."})
+        if any(sub.split("?")[0].startswith(b) for b in TRADING_BLOCKED):
+            return self.send(403, {"error": "Not available through Sarah. Use the NAS page on your home network."})
+        data = None
+        if method == "POST":
+            if self.headers.get("Origin") not in (f"http://{HOST}:{PORT}", f"http://localhost:{PORT}", *EXTRA_ORIGINS):
+                return self.send(403, {"error": "Blocked by the shield."})
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 100_000:
+                return self.send(413, {"error": "too large"})
+            data = self.rfile.read(n) if n else b""
+            audit("adeel", "trading_hub_action", {"path": sub.split("?")[0][:80]}, company="Trading Command Center")
+        req = urllib.request.Request(TRADING_HUB_URL + sub, data=data, method=method,
+                                     headers={"Content-Type": self.headers.get("Content-Type") or "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=70) as r:
+                return self.send(r.status, raw=r.read(), ctype=r.headers.get("Content-Type") or "application/octet-stream")
+        except urllib.error.HTTPError as e:
+            return self.send(e.code, raw=e.read(), ctype=e.headers.get("Content-Type") or "application/json")
+        except Exception as e:  # noqa: BLE001
+            return self.send(502, {"error": f"Trading hub not reachable ({type(e).__name__})."})
+
     def tailnet_user_ok(self):
         if not ALLOWED_USERS:
             return True
@@ -896,6 +928,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(403, {"error": "This Tailscale account is not allowed."})
         if path in ("/", "/index.html", "/sarah-grid.html"):
             return self.send(200, raw=UI_FILE.read_bytes(), ctype="text/html; charset=utf-8")
+        if path == "/trading" or path.startswith("/trading/"):
+            return self.trading_proxy("GET")
         if path == "/manifest.webmanifest":
             man = {"name": "SARAH", "short_name": "SARAH", "start_url": "/", "scope": "/", "display": "standalone",
                    "background_color": "#020c14", "theme_color": "#020c14",
@@ -1023,6 +1057,8 @@ class H(BaseHTTPRequestHandler):
         if not self.tailnet_user_ok():
             audit("shield", "blocked_user", {"login": self.headers.get("Tailscale-User-Login")})
             return self.send(403, {"error": "This Tailscale account is not allowed."})
+        if path.startswith("/trading/"):
+            return self.trading_proxy("POST")
         if not self.same_origin():
             return self.send(403, {"error": "Blocked by the shield."})
         try:
