@@ -130,6 +130,15 @@ class Wiring(unittest.TestCase):
         sc.make_draft(self.remedy, "Marketing", "Brief", "Mention apex-physio.ca", actor="sarah")
         self.assertTrue(sc.q("SELECT 1 FROM drafts WHERE project_id=? AND title=? AND status IN ('pending','held')", (self.remedy["id"], "Brief"), one=True))
 
+    def test_email_agent_is_a_switch_and_shows_for_both_companies(self):
+        self.assertIn("Email", sc.AGENTS)
+        view = {c["company"]: c for c in sc.supervisor_view()}
+        for co in ("APEX Physio", "Remedy Pills"):
+            names = [a["name"] for a in view[co]["agents"]]
+            self.assertEqual(names, sc.AGENTS)
+            self.assertTrue(next(a for a in view[co]["agents"] if a["name"] == "Email")["role"])
+        self.assertFalse(next(a for a in view["APEX Physio"]["agents"] if a["name"] == "Email")["on"])
+
     def test_old_database_gets_new_columns(self):
         sc.CON.close()
         con = sqlite3.connect(sc.DB_PATH)
