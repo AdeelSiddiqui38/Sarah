@@ -70,6 +70,21 @@ class Bots(unittest.TestCase):
         self.assertEqual(st["bots"]["telegram"]["recent_log"], ["[x] Listening on channels"])
         self.assertEqual(st["fx_journal"]["count"], 1)
 
+    def test_risk_limits(self):
+        (self.folder / "trading-hub" / "logs").mkdir(parents=True)
+        write(self.folder / "trading-hub" / "logs", "prices.json", {"equity": {"NVDA": 200.0}})
+        write(self.d, "portfolio.json", {"cash": 500.0, "positions": {"NVDA": {"qty": 40, "avg_price": 150.0}}})
+        write(self.d, "tactical_portfolio.json", {"positions": {}, "equity_curve": []})
+        st = tb.status(str(self.folder))
+        refs = [r for r, _ in tb.problems(st, datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc))]
+        self.assertIn("risk:equity-position:NVDA", refs)   # 8000 of 8500 = 94%
+        self.assertIn("risk:equity-cash", refs)             # 6% cash
+        write(self.d, "momentum_portfolio.json", {"cash": 9978.0, "closed_trades": [], "open_positions": [],
+              "day": {"date": "2026-11-16", "realized": -21.5, "halted": "max loss", "traded": ["XLAB"]}})
+        write(self.d, "portfolio.json", {"cash": 9000.0, "positions": {"NVDA": {"qty": 5, "avg_price": 150.0}}})
+        refs = [r for r, _ in tb.problems(tb.status(str(self.folder)), datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc))]
+        self.assertEqual(refs, ["risk:momentum-loss:2026-11-16"])
+
     def test_missing_folder(self):
         st = tb.status("/nope")
         self.assertFalse(st["found"])
