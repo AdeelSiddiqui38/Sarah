@@ -1014,6 +1014,11 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, raw=UI_FILE.read_bytes(), ctype="text/html; charset=utf-8")
         if path == "/trading" or path.startswith("/trading/"):
             return self.trading_proxy("GET")
+        if path in ("/m", "/trading-m"):
+            # Phone view of Slot 03 (separate from the PC dashboard): logged-in only
+            if not self.authed():
+                return self.send(302, raw=b"", headers={"Location": "/"})
+            return self.send(200, raw=(BASE_DIR / "trading-mobile.html").read_bytes(), ctype="text/html; charset=utf-8")
         if path == "/manifest.webmanifest":
             man = {"name": "SARAH", "short_name": "SARAH", "start_url": "/", "scope": "/", "display": "standalone",
                    "background_color": "#020c14", "theme_color": "#020c14",

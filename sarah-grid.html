@@ -406,7 +406,7 @@ async function loadBots(){
        ['LEVERAGE', st.bots.leverage, a => `Cash ${money(a.cash)} · ${a.open_positions} open · ${a.closed_trades} closed · realized ${money(a.realized)}`],
        ['TELEGRAM', st.bots.telegram, a => 'Follows sonaabeyg, FX Culture, Dr. Smart AI']].map(([k, b, f]) => b ? `<div class="check"><span class="w">${k}</span><span>${esc(b.label)}<br><span class="sub">${f(b.account || {})}</span><br><span class="sub">Last log ${ago(b.minutes_since_log)}: ${esc((b.recent_log.slice(-1)[0] || '').slice(0, 140))}</span></span><span class="s good">PAPER</span></div>` : '').join('')}
     <div class="check"><span class="w">FX / GOLD</span><span>Signal journal (never traded)<br><span class="sub">${st.fx_journal ? st.fx_journal.count : 0} signals${st.fx_journal && st.fx_journal.last.length ? ' · last: ' + esc(st.fx_journal.last.slice(-3).map(x => `${(x.side || '').toUpperCase()} ${x.symbol || ''} (${x.channel || ''})`).join('; ')) : ''}</span></span><span class="s hold">LOG</span></div>
-    <div class="row"><a class="btn" href="/trading/" target="_blank" rel="noopener" style="text-decoration:none">Open Command Center</a></div>
+    <div class="row"><a class="btn" href="/trading/" target="_blank" rel="noopener" style="text-decoration:none">Open Command Center</a><a class="btn ghost" href="/trading-m" target="_blank" rel="noopener" style="text-decoration:none">Phone view</a></div>
     <p class="note">Bots run in the trading-hub app on the NAS. Sarah only reads their files; she cannot trade.</p>`;
 }
 function openNew(slot){
