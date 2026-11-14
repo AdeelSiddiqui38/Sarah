@@ -61,6 +61,13 @@ SESSION_HOURS = 12
 MAX_FAILS, LOCK_SECONDS = 5, 300
 MAX_SLOTS = 8
 AGENTS = ["Finance", "Email", "Website", "Coordinator", "Administration", "Marketing", "Social media", "HR"]
+# Every agent name any company can use (companies with their own agent set, e.g. Trading Command Center, add theirs)
+ALL_AGENTS = list(dict.fromkeys(AGENTS + [a for c in supervisor.COMPANIES.values() if c.get("own_agents") for a in c["agents"]]))
+
+
+def agents_for(p):
+    """Agent switches for one project: its company's own set if it has one, else the default business agents."""
+    return supervisor.agents_for(supervisor.company_of(p["name"]), AGENTS)
 MODEL = os.environ.get("SARAH_MODEL", "claude-haiku-5-5")
 ANTHROPIC_URL = os.environ.get("SARAH_ANTHROPIC_URL", "https://api.anthropic.com/v1/messages")
 OPENAI_MODEL = os.environ.get("SARAH_OPENAI_MODEL", "gpt-6.1-terra")
@@ -334,7 +341,7 @@ TOOLS = [
      "description": "Create a draft for Adeel to approve. Draft-only mode: this never sends, pays, posts or deletes anything. Use for any action request (emails, reminders, posts, payments, filings).",
      "input_schema": {"type": "object", "properties": {
          "project": {"type": "string", "description": "Exact project name from the list"},
-         "agent": {"type": "string", "enum": AGENTS},
+         "agent": {"type": "string", "enum": ALL_AGENTS},
          "title": {"type": "string"},
          "body": {"type": "string", "description": "The full draft text"}},
          "required": ["project", "agent", "title", "body"]}},
@@ -652,7 +659,8 @@ def supervisor_view():
         c = supervisor.COMPANIES[company]
         out.append({
             "company": company, "project": p["name"],
-            "agents": [{"name": a, "role": c["agents"].get(a, ""), "on": bool(p["agents"].get(a))} for a in AGENTS],
+            "agents": [{"name": a, "role": c["agents"].get(a, ""), "on": bool(p["agents"].get(a)),
+                        "skills": supervisor.skills_for(company, a)} for a in agents_for(p)],
             "alerts": q("SELECT * FROM alerts WHERE company=? AND acked IS NULL ORDER BY id DESC", (company,)),
             "questions": q("SELECT * FROM questions WHERE company=? ORDER BY status='open' DESC, id DESC LIMIT 20", (company,)),
             "held": q("SELECT id, agent, title, body, review, created FROM drafts WHERE project_id=? AND status='held' ORDER BY id", (p["id"],)),
@@ -936,6 +944,8 @@ class H(BaseHTTPRequestHandler):
             ps = list_projects()
             for p in ps:
                 p["pending"] = q("SELECT count(*) AS n FROM drafts WHERE project_id=? AND status='pending'", (p["id"],), one=True)["n"]
+                p["agent_list"] = agents_for(p)
+                p["agent_skills"] = {a: supervisor.skills_for(supervisor.company_of(p["name"]), a) for a in p["agent_list"]}
                 if p["agents"].get("Finance"):
                     p["checklist"] = checklist(p)
             return self.send(200, {"projects": ps, "slots": MAX_SLOTS, "agents": AGENTS})
@@ -1248,7 +1258,7 @@ class H(BaseHTTPRequestHandler):
                 audit("adeel", "project_removed", {"name": p["name"]})
                 return self.send(200, {"ok": True})
             a = b.get("agent")
-            if a not in AGENTS:
+            if a not in agents_for(p):
                 return self.send(400, {"error": "Unknown agent."})
             ag = json.loads(p["agents"])
             on = not ag.get(a)

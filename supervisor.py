@@ -31,6 +31,32 @@ COMPANIES = {
             "Administration": "Company records, renewals, condo and vendor admin",
         },
     },
+    "Trading Command Center": {
+        "match": r"trading",
+        "identifiers": ["trading command center", "trading-command-center", "paperbot", "paper bot"],
+        # Own agent set: this company does not use the generic business agents (Adeel, Nov 14 2026)
+        "own_agents": True,
+        "agents": {
+            "Gappers Scanner": "Pre-market gap scan, Ross Cameron 5 pillars (price, float, relative volume, % gain, news); top gappers to the watchlist",
+            "Watchlist & Catalysts": "Daily watchlist, news catalysts and upcoming events for the names in play",
+            "Market Research": "Market wrap, quick takes, earnings setups and recaps for watchlist names",
+            "Paper Bots": "paperbot, leverage, momentum and tactical bots; paper money only, never real orders",
+            "Telegram Signals": "Telegram channel listener: parses text, voice notes and screenshots into paper trade ideas",
+            "Journal & Risk": "Trade journal, weekly execution sheet rules (A+ setups, max loss, stop after 2 losses), candlestick review",
+            "Strategy Lab": "Backtests (ORB small caps, pairs, trend/mean-reversion), replay tools, Vibe-Trading and the signal agent",
+        },
+        # Claude skills each agent uses when Claude works on this company (names as listed in Claude)
+        "skills": {
+            "Gappers Scanner": ["bigdata-com:bigdata-screen", "bigdata-com:bigdata-catalysts", "bigdata-com:bigdata-stock-move"],
+            "Watchlist & Catalysts": ["bigdata-com:bigdata-watchlist", "bigdata-com:bigdata-catalysts", "bigdata-com:bigdata-company-brief"],
+            "Market Research": ["bigdata-com:bigdata-markets-today", "bigdata-com:bigdata-quick-take", "bigdata-com:bigdata-earnings-preview",
+                                "bigdata-com:bigdata-earnings-recap", "bigdata-com:bigdata-sector", "bigdata-com:bigdata-theme"],
+            "Paper Bots": ["bigdata-com:bigdata-stock-move"],
+            "Telegram Signals": ["bigdata-com:bigdata-stock-move", "bigdata-com:bigdata-quick-take"],
+            "Journal & Risk": ["bigdata-com:bigdata-risk"],
+            "Strategy Lab": ["bigdata-com:bigdata-screen", "bigdata-com:bigdata-valuation"],
+        },
+    },
     "Remedy Pills": {
         "match": r"remedy",
         "identifiers": ["remedy pills", "remedypills", "remedypillspharmacy"],
@@ -51,6 +77,16 @@ PASSWORD = re.compile(r"\b(password|passcode|app password|pin)\s*[:=]\s*\S+", re
 SIN = re.compile(r"\b\d{3}[ -]\d{3}[ -]\d{3}\b")
 ACCOUNT = re.compile(r"\b(account|acct|a/c)\s*(no\.?|number|#)?\s*[:#]?\s*\d{5,}\b", re.I)
 CARD = re.compile(r"\b(?:\d[ -]?){13,19}\b")
+
+
+def agents_for(company, default):
+    """The agent switches a company gets: its own set, or Sarah's default business agents."""
+    c = COMPANIES.get(company or "")
+    return list(c["agents"]) if c and c.get("own_agents") else list(default)
+
+
+def skills_for(company, agent):
+    return list(COMPANIES.get(company or "", {}).get("skills", {}).get(agent, []))
 
 
 def company_of(project_name):
