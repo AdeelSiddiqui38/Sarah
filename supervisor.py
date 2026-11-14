@@ -7,6 +7,7 @@ PILLAR rules (Adeel, Nov 9 2026), for every company in Sarah, now and future:
   P3 agents are draft-only; Adeel approves anything that sends, pays, publishes or deletes
   P4 every action is logged (time, company, agent, action, input, result, approver)
   P5 Supervisor communicates by alerts only (no daily or weekly summaries for now)
+     exception (Adeel, Nov 14 2026): Trading Command Center sends one end-of-day paper P&L report
   P6 when the Supervisor needs direction she asks Adeel and waits
   P7 a new company gets the same template, and its Supervisor comes with it
 """
@@ -162,7 +163,7 @@ def alert_text(kind, company, detail):
         return f"{company}: {d.get('agent')} task '{d.get('task')}' failed: {d.get('error', '')}"
     if kind == "stale":
         return f"{company}: draft #{d.get('draft')} '{d.get('title', '')}' has waited {d.get('days')} days for your decision."
-    if kind == "bot":
+    if kind in ("bot", "report"):
         return f"{company}: {d.get('text', '')}"
     if kind == "question":
         return f"{company}: Supervisor has a question for you: {d.get('question', '')}"

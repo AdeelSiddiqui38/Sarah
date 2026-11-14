@@ -359,6 +359,7 @@ function openProject(id){
       <p class="note">Your accountant reviews and files. Sarah prepares and flags what is missing.</p>`
       : (p.agent_list || AGENTS).includes('Finance') ? `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>` : ''}
     ${p.agents['Paper Bots'] ? `<h2 class="ttl" style="margin:0">Paper bots (paper money only)</h2><div id="botsBox" class="sub">Reading the bots…</div>` : ''}
+    ${p.agents['Journal & Risk'] ? `<h2 class="ttl" style="margin:0">Daily P&amp;L reports</h2><div id="reportsBox" class="sub">Loading…</div>` : ''}
     ${p.agents.Finance && /remedy/i.test(p.name) ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">Open ledger</a></div>` : ''}
     ${p.agents.Finance && /apex/i.test(p.name) ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/apex-finance" target="_blank" rel="noopener" style="text-decoration:none">Open APEX Finance</a></div>` : ''}
     <form class="new" id="folderForm"><label for="pFolderEdit">Project folder (path on the NAS)<input id="pFolderEdit" type="text" value="${esc(p.folder || '')}" placeholder="/projects/Remedy Pills"></label>
@@ -366,11 +367,30 @@ function openProject(id){
     <div class="row"><button class="btn ghost" type="button" id="rmBtn">Remove project</button></div>`);
   decode($('mTitle'), p.name.toUpperCase());
   if (p.agents['Paper Bots']) loadBots();
+  if (p.agents['Journal & Risk']) loadReports();
   $('folderForm').onsubmit = async e => { e.preventDefault(); await api('POST', `/api/projects/${p.id}/folder`, { folder: $('pFolderEdit').value.trim() });
     sfx.ok(); await loadProjects(); loadAudit(); say(`Folder updated for ${p.name}.`); openProject(p.id); };
   m.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => { sfx.click(); await api('POST', `/api/projects/${p.id}/agent`, { agent: b.dataset.a }); await loadProjects(); loadAudit(); openProject(p.id); });
   $('rmBtn').onclick = async () => { const r = $('rmBtn'); if (!r.dataset.armed) { r.dataset.armed = 1; r.textContent = 'Click again to remove'; sfx.alert(); return; }
     await api('POST', `/api/projects/${p.id}/delete`, {}); closeModal(); await loadProjects(); loadAudit(); say(`Removed ${p.name}. Its slot is empty again.`); };
+}
+async function loadReports(){
+  const box = $('reportsBox'); if (!box) return;
+  let r; try { r = await api('GET', '/api/trading/reports'); } catch (e) { box.textContent = 'Could not load reports: ' + e.message; return; }
+  const m = x => (x < 0 ? '-' : '+') + '$' + Math.abs(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  box.innerHTML = `${(r.reports || []).slice(0, 7).map(x => `<div class="check" style="cursor:pointer" data-rep="${x.id}"><span class="w">${esc(x.day)}</span><span>Today <b>${m(x.summary.day_pl || 0)}</b> · all bots $${(x.summary.value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} · since start ${m(x.summary.since_start || 0)}</span><span class="s ${x.emailed ? 'good' : 'hold'}">${x.emailed ? 'EMAILED' : 'IN SARAH'}</span></div>`).join('') || '<p class="note">First report arrives on the next weekday at ' + esc(r.time) + ' (Calgary).</p>'}
+    <pre id="repBody" class="sub" hidden style="white-space:pre-wrap;max-height:320px;overflow:auto;background:rgba(0,0,0,.25);padding:10px;border-radius:8px"></pre>
+    <form id="repMail" class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">
+      <input id="repEmail" type="email" placeholder="your Gmail address" value="${esc(r.email || '')}" style="flex:1;min-width:180px">
+      <input id="repPw" type="password" autocomplete="off" placeholder="${r.gmail_ready ? 'Gmail app password saved' : 'Gmail app password (16 letters)'}" style="flex:1;min-width:180px">
+      <button class="btn" type="submit">Save email</button><button class="btn ghost" id="repRun" type="button">Make today's report now</button></form>
+    <p class="note">Weekdays at ${esc(r.time)} Calgary. Emailed from your Gmail to the same address only${r.email && r.gmail_ready ? '' : ' (set both fields above to switch email on)'}; always kept here too.</p>`;
+  box.querySelectorAll('[data-rep]').forEach(el => el.onclick = async () => { const d = await api('GET', '/api/trading/reports/' + el.dataset.rep); const pre = $('repBody'); pre.textContent = d.body; pre.hidden = false; });
+  $('repMail').onsubmit = async ev => { ev.preventDefault();
+    try { await api('POST', '/api/trading/report/email', { email: $('repEmail').value.trim() });
+      if ($('repPw').value.trim()) await api('POST', '/api/vault', { name: 'gmail_app_password', value: $('repPw').value.trim(), project: 'Trading Command Center' });
+      sfx.ok(); say('Report email saved.'); loadReports(); } catch (e) { say('Not saved: ' + e.message); } };
+  $('repRun').onclick = async () => { try { const d = await api('POST', '/api/trading/report/run', {}); await loadReports(); const pre = $('repBody'); pre.textContent = d.body || d.error; pre.hidden = false; } catch (e) { say('Report failed: ' + e.message); } };
 }
 async function loadBots(){
   const box = $('botsBox'); if (!box) return;

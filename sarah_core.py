@@ -41,6 +41,7 @@ import apex_mail
 import apex_report
 import supervisor
 import trading_bots
+import trading_report
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -118,6 +119,9 @@ def init_db():
                 started TEXT, finished TEXT, detail TEXT);
             CREATE TABLE IF NOT EXISTS alerts (
                 id INTEGER PRIMARY KEY, ts TEXT, company TEXT, kind TEXT, msg TEXT, ref TEXT, acked TEXT);
+            CREATE TABLE IF NOT EXISTS reports (
+                id INTEGER PRIMARY KEY, company TEXT, day TEXT, summary TEXT, snapshot TEXT, body TEXT,
+                created TEXT, emailed TEXT, UNIQUE(company, day));
             CREATE TABLE IF NOT EXISTS questions (
                 id INTEGER PRIMARY KEY, ts TEXT, company TEXT, agent TEXT, question TEXT, context TEXT,
                 status TEXT DEFAULT 'open', answer TEXT, answered TEXT);
@@ -656,6 +660,86 @@ def trading_bots_job():
         raise_alert("Trading Command Center", "bot", {"text": text}, ref=ref)
 
 
+# ---- Trading Command Center: end-of-day paper report (Adeel, Nov 14 2026: daily P&L report by email + Sarah;
+# this is the one exception to "alerts only, no daily summaries" and only for Slot 03).
+REPORT_TIME = (14, 30)          # Calgary time (container TZ America/Edmonton), 30 min after the US close
+EMAIL_RE = re.compile(r"[^@\s]+@gmail\.com")
+
+
+def _hub_state():
+    try:
+        with urllib.request.urlopen(TRADING_HUB_URL + "/api/state", timeout=25) as r:
+            return json.loads(r.read())
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def trading_report_email():
+    return setting("trading_report_email") or ""
+
+
+def send_trading_report(p, subject, body):
+    """Email the report to Adeel's own Gmail, from that same Gmail (standing OK from Adeel for this report only).
+    Never sends anywhere else."""
+    import smtplib
+    from email.message import EmailMessage
+    to = trading_report_email()
+    pw = vault_get("gmail_app_password", p["slot"])
+    if not (to and pw):
+        return False
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = to, to, subject
+    msg.set_content(body)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as S:
+        S.login(to, pw)
+        S.send_message(msg, to_addrs=[to])
+    audit("sarah", "trading_report_emailed", {"to": to, "subject": subject}, company="Trading Command Center")
+    return True
+
+
+def trading_report_job(force=False, when=None):
+    """Weekdays from 2:30 PM: build today's paper report once, keep it in Sarah, alert, and email it."""
+    p = trading_project()
+    if not p:
+        return None
+    when = when or datetime.now()
+    if not force and (when.weekday() >= 5 or (when.hour, when.minute) < REPORT_TIME):
+        return None
+    day = when.date()
+    have = q("SELECT id FROM reports WHERE company=? AND day=?", ("Trading Command Center", day.isoformat()), one=True)
+    if have and not force:
+        return have["id"]
+    prev = q("SELECT snapshot FROM reports WHERE company=? AND day<? ORDER BY day DESC LIMIT 1",
+             ("Trading Command Center", day.isoformat()), one=True)
+    snap = trading_report.snapshot(p["folder"], _hub_state(), day)
+    summary, body = trading_report.build(snap, json.loads(prev["snapshot"]) if prev else None)
+    q("INSERT OR REPLACE INTO reports (company,day,summary,snapshot,body,created) VALUES (?,?,?,?,?,?)",
+      ("Trading Command Center", day.isoformat(), json.dumps(summary), json.dumps(snap), body, now()))
+    rid = q("SELECT id FROM reports WHERE company=? AND day=?", ("Trading Command Center", day.isoformat()), one=True)["id"]
+    audit("sarah", "trading_report", {"day": day.isoformat(), "day_pl": summary["day_pl"]}, company="Trading Command Center")
+    raise_alert("Trading Command Center", "report", {"text": f"Daily paper report {day.isoformat()}: today "
+                f"{trading_report._m(summary['day_pl'])}, all bots ${summary['value']:,.2f} "
+                f"({trading_report._m(summary['since_start'])} since start)."}, ref=f"report:{day.isoformat()}")
+    subject = f"Paper trading {day.strftime('%a %b %d')}: today {trading_report._m(summary['day_pl'])}"
+    try:
+        if send_trading_report(p, subject, body):
+            q("UPDATE reports SET emailed=? WHERE id=?", (now(), rid))
+    except Exception as e:  # noqa: BLE001  (report stays in Sarah; Adeel is told)
+        raise_alert("Trading Command Center", "job_error", {"agent": "Journal & Risk", "task": "email daily report",
+                    "error": str(e)[:150]}, ref=f"report-email:{day.isoformat()}")
+    return rid
+
+
+def _report_loop():
+    while True:
+        try:
+            if trading_project():
+                supervise("Trading Command Center", "Journal & Risk", "daily paper report", trading_report_job)
+        except Exception as e:  # noqa: BLE001
+            print("report loop error:", e, flush=True)
+        time.sleep(300)
+
+
 def stale_check():
     """Alert once on drafts that have waited STALE_DAYS or more for Adeel."""
     rows = q("SELECT d.id, d.title, d.created, p.name AS project FROM drafts d LEFT JOIN projects p ON p.id=d.project_id WHERE d.status='pending'")
@@ -1003,6 +1087,17 @@ class H(BaseHTTPRequestHandler):
                 if p["agents"].get("Finance"):
                     p["checklist"] = checklist(p)
             return self.send(200, {"projects": ps, "slots": MAX_SLOTS, "agents": AGENTS})
+        if path == "/api/trading/reports":
+            rows = q("SELECT id, day, summary, emailed FROM reports WHERE company=? ORDER BY day DESC LIMIT 30", ("Trading Command Center",))
+            p = trading_project()
+            return self.send(200, {"reports": [dict(r, summary=json.loads(r["summary"] or "{}")) for r in rows],
+                                   "email": trading_report_email(),
+                                   "gmail_ready": bool(p and vault_get("gmail_app_password", p["slot"])),
+                                   "time": "%02d:%02d" % REPORT_TIME})
+        m_r = re.fullmatch(r"/api/trading/reports/(\d+)", path)
+        if m_r:
+            r = q("SELECT id, day, body FROM reports WHERE id=?", (int(m_r.group(1)),), one=True)
+            return self.send(200, dict(r)) if r else self.send(404, {"error": "No such report."})
         if path == "/api/trading/bots":
             p = trading_project()
             if not p:
@@ -1370,6 +1465,20 @@ class H(BaseHTTPRequestHandler):
             q("UPDATE drafts SET status=?, decided=?, decided_by=? WHERE id=?", (st, now(), "adeel", d["id"]))
             audit("adeel", "draft_" + st, {"draft": d["id"], "project": d["project"], "title": d["title"], "executed": False})
             return self.send(200, {"ok": True, "note": "Draft-only mode: recorded, nothing was sent."})
+        if path == "/api/trading/report/email":
+            addr = str(b.get("email", "")).strip().lower()
+            if addr and not EMAIL_RE.fullmatch(addr):
+                return self.send(400, {"error": "Enter a Gmail address (it sends from and to that same account)."})
+            setting("trading_report_email", addr)
+            audit("adeel", "trading_report_email_set", {"email": addr or "(off)"}, company="Trading Command Center")
+            return self.send(200, {"ok": True})
+        if path == "/api/trading/report/run":
+            try:
+                rid = trading_report_job(force=True)
+            except Exception as e:  # noqa: BLE001
+                return self.send(500, {"error": str(e)[:200]})
+            r = q("SELECT id, day, body, emailed FROM reports WHERE id=?", (rid,), one=True) if rid else None
+            return self.send(200, dict(r) if r else {"error": "No Trading Command Center project."})
         if path == "/api/vault":
             name, value = str(b.get("name", "")), str(b.get("value", ""))
             _vp = find_project(str(b.get("project") or "Remedy Pills"))
@@ -1925,6 +2034,7 @@ def main():
     srv = ThreadingHTTPServer((HOST, PORT), H)
     threading.Thread(target=_task_loop, daemon=True).start()
     threading.Thread(target=_mail_loop, daemon=True).start()
+    threading.Thread(target=_report_loop, daemon=True).start()
     print(f"Sarah Core online at http://{HOST}:{PORT}  (vault: {VAULT_KIND})", flush=True)
     try:
         srv.serve_forever()
