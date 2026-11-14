@@ -357,18 +357,32 @@ function openProject(id){
     ${c ? `<h2 class="ttl" style="margin:0">Finance: CRA record collection</h2>${c.folder_found ? '' : '<p class="err">Project folder not found on this computer.</p>'}
       <div>${c.items.map(r => `<div class="check"><span class="w">${esc(r.when)}</span><span>${esc(r.item)}${r.missing && r.missing.length ? `<br><span class="sub">Missing: ${esc(r.missing.join(', '))}</span>` : ''}</span><span class="s ${r.level}">${esc(r.state)}</span></div>`).join('')}</div>
       <p class="note">Your accountant reviews and files. Sarah prepares and flags what is missing.</p>`
-      : `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>`}
+      : (p.agent_list || AGENTS).includes('Finance') ? `<p class="note">Turn on the Finance agent to see this project's CRA record checklist.</p>` : ''}
+    ${p.agents['Paper Bots'] ? `<h2 class="ttl" style="margin:0">Paper bots (paper money only)</h2><div id="botsBox" class="sub">Reading the bots…</div>` : ''}
     ${p.agents.Finance && /remedy/i.test(p.name) ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/ledger" target="_blank" rel="noopener" style="text-decoration:none">Open ledger</a></div>` : ''}
     ${p.agents.Finance && /apex/i.test(p.name) ? `<h2 class="ttl" style="margin:0">Tools</h2><div class="row"><a class="btn" href="/apex-finance" target="_blank" rel="noopener" style="text-decoration:none">Open APEX Finance</a></div>` : ''}
     <form class="new" id="folderForm"><label for="pFolderEdit">Project folder (path on the NAS)<input id="pFolderEdit" type="text" value="${esc(p.folder || '')}" placeholder="/projects/Remedy Pills"></label>
       <div class="row"><button class="btn" type="submit">Save folder</button></div></form>
     <div class="row"><button class="btn ghost" type="button" id="rmBtn">Remove project</button></div>`);
   decode($('mTitle'), p.name.toUpperCase());
+  if (p.agents['Paper Bots']) loadBots();
   $('folderForm').onsubmit = async e => { e.preventDefault(); await api('POST', `/api/projects/${p.id}/folder`, { folder: $('pFolderEdit').value.trim() });
     sfx.ok(); await loadProjects(); loadAudit(); say(`Folder updated for ${p.name}.`); openProject(p.id); };
   m.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => { sfx.click(); await api('POST', `/api/projects/${p.id}/agent`, { agent: b.dataset.a }); await loadProjects(); loadAudit(); openProject(p.id); });
   $('rmBtn').onclick = async () => { const r = $('rmBtn'); if (!r.dataset.armed) { r.dataset.armed = 1; r.textContent = 'Click again to remove'; sfx.alert(); return; }
     await api('POST', `/api/projects/${p.id}/delete`, {}); closeModal(); await loadProjects(); loadAudit(); say(`Removed ${p.name}. Its slot is empty again.`); };
+}
+async function loadBots(){
+  const box = $('botsBox'); if (!box) return;
+  let st; try { st = await api('GET', '/api/trading/bots'); } catch (e) { box.textContent = 'Could not read the bots: ' + e.message; return; }
+  if (!st.found) { box.innerHTML = '<p class="err">trading-paperbot folder not found in the project folder.</p>'; return; }
+  const money = x => x == null ? '–' : '$' + Number(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const ago = m => m == null ? 'never' : m < 90 ? m + ' min ago' : m < 2880 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago';
+  const mo = st.bots.momentum, ta = st.bots.tactical, ma = mo.account, tc = ta.account;
+  box.innerHTML = `${(st.problems || []).map(t => `<p class="err">${esc(t)}</p>`).join('')}
+    <div class="check"><span class="w">MOMENTUM</span><span>${esc(mo.label)}<br><span class="sub">Cash ${money(ma.cash)} · ${ma.open_positions} open · ${ma.closed_trades} closed · realized ${money(ma.realized)}${ma.day && ma.day.date ? ` · today ${money(ma.day.realized)}${ma.day.halted ? ' (halted)' : ''}` : ''}</span><br><span class="sub">Last log ${ago(mo.minutes_since_log)}: ${esc((mo.recent_log.slice(-1)[0] || '').slice(0, 140))}</span></span><span class="s ${mo.has_account ? 'good' : 'warn'}">${mo.has_account ? 'PAPER' : 'NO ACCOUNT'}</span></div>
+    <div class="check"><span class="w">TACTICAL</span><span>${esc(ta.label)}<br><span class="sub">Equity ${money(tc.equity)}${tc.return_pct != null ? ` (${tc.return_pct > 0 ? '+' : ''}${tc.return_pct}%)` : ''} as of ${esc(tc.as_of || '–')} · holds ${esc(Object.keys(tc.positions || {}).join(', ') || 'nothing yet')}${tc.pending ? ' · rebalance pending' : ''}</span><br><span class="sub">Last log ${ago(ta.minutes_since_log)}: ${esc((ta.recent_log.slice(-1)[0] || '').slice(0, 140))}</span></span><span class="s ${tc.data_problem ? 'warn' : 'good'}">${tc.data_problem ? 'BAD DATA' : 'PAPER'}</span></div>
+    <p class="note">Bots run in the trading-hub app on the NAS. Sarah only reads their files; she cannot trade.</p>`;
 }
 function openNew(slot){
   slotsEl.children[slot]?.classList.add('active');

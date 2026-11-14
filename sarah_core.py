@@ -40,6 +40,7 @@ import apex_vendors
 import apex_mail
 import apex_report
 import supervisor
+import trading_bots
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("SARAH_DATA_DIR", BASE_DIR / "data"))
@@ -353,6 +354,9 @@ TOOLS = [
          "question": {"type": "string"},
          "context": {"type": "string"}},
          "required": ["project", "question"]}},
+    {"name": "trading_bots",
+     "description": "Trading Command Center only: read the paper-trading bots' accounts (momentum and tactical), open positions, recent trades and last log lines. Read-only; paper money only; nothing here can start, stop or trade.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "project_status",
      "description": "Read a project's status: relevance, active agents, CRA record checklist and pending drafts.",
      "input_schema": {"type": "object", "properties": {"project": {"type": "string"}}, "required": ["project"]}},
@@ -481,6 +485,9 @@ def run_tool(name, args):
             return {"error": "No such company."}
         qid = ask_adeel(company, args.get("agent") or "Supervisor", str(args.get("question", ""))[:500], str(args.get("context", ""))[:1000])
         return {"ok": True, "question_id": qid, "status": "asked; waiting for Adeel's answer"}
+    if name == "trading_bots":
+        p = trading_project()
+        return trading_bots.status(p["folder"]) if p else {"error": "The Trading Command Center project is not set up."}
     if name == "apex_inbox":
         return apex_inbox_tool(args)
     if name == "apex_email_draft":
@@ -631,6 +638,19 @@ def supervise(company, agent, task, fn):
         q("INSERT INTO tasks (company,agent,task,status,started,finished,detail) VALUES (?,?,?,?,?,?,?)",
           (company, agent, task, "done", started, now(), json.dumps({"log_entries": did})))
     return True
+
+
+def trading_project():
+    return next((p for p in list_projects() if supervisor.company_of(p["name"]) == "Trading Command Center"), None)
+
+
+def trading_bots_job():
+    """Paper Bots agent: alert (once per problem) when a bot goes silent or its account goes bad. Read-only."""
+    p = trading_project()
+    if not p or not p["agents"].get("Paper Bots"):
+        return
+    for ref, text in trading_bots.problems(trading_bots.status(p["folder"])):
+        raise_alert("Trading Command Center", "bot", {"text": text}, ref=ref)
 
 
 def stale_check():
@@ -949,6 +969,13 @@ class H(BaseHTTPRequestHandler):
                 if p["agents"].get("Finance"):
                     p["checklist"] = checklist(p)
             return self.send(200, {"projects": ps, "slots": MAX_SLOTS, "agents": AGENTS})
+        if path == "/api/trading/bots":
+            p = trading_project()
+            if not p:
+                return self.send(404, {"error": "No Trading Command Center project."})
+            st = trading_bots.status(p["folder"])
+            st["problems"] = [t for _, t in trading_bots.problems(st)]
+            return self.send(200, st)
         if path == "/api/drafts":
             rows = q("SELECT d.*, p.name AS project FROM drafts d LEFT JOIN projects p ON p.id=d.project_id WHERE status='pending' ORDER BY d.id")
             return self.send(200, {"drafts": rows})
@@ -1808,6 +1835,7 @@ def _task_loop():
         ("Remedy Pills", "Finance", "statement reminders", monthly_statements_task),
         ("APEX Physio", "Finance", "monthly partner snapshot", apex_report_job),
         ("APEX Physio", "Finance", "weekly statements and reminders", apex_job),
+        ("Trading Command Center", "Paper Bots", "paper bot health check", trading_bots_job),
     ]
     while True:
         for company, agent, task, fn in jobs:
