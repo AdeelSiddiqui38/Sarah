@@ -162,6 +162,8 @@ def alert_text(kind, company, detail):
         return f"{company}: {d.get('agent')} task '{d.get('task')}' failed: {d.get('error', '')}"
     if kind == "stale":
         return f"{company}: draft #{d.get('draft')} '{d.get('title', '')}' has waited {d.get('days')} days for your decision."
+    if kind == "bot":
+        return f"{company}: {d.get('text', '')}"
     if kind == "question":
         return f"{company}: Supervisor has a question for you: {d.get('question', '')}"
     return f"{company}: {kind}"
