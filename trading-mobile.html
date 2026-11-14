@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#02060a">
+<title>Trading (phone)</title>
+<style>
+:root { --bg:#02060a; --card:#07131a; --line:#0f4a54; --ink:#d8f6fa; --dim:#7a9aa1; --cyan:#3df2ff; --up:#3fdc8a; --down:#ff6b6b; --warn:#ffc857; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding:12px 14px calc(24px + env(safe-area-inset-bottom)); }
+header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+h1 { font-size:15px; letter-spacing:.25em; color:var(--cyan); margin:0; }
+.upd { font-size:11px; color:var(--dim); }
+.hero { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+.hero .k { font-size:12px; color:var(--dim); }
+.hero .big { font-size:30px; font-weight:700; margin:2px 0 6px; }
+.hero .row { display:flex; gap:14px; flex-wrap:wrap; font-size:13px; }
+.up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--ink); }
+h2 { font-size:12px; letter-spacing:.18em; color:var(--cyan); margin:18px 2px 8px; text-transform:uppercase; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; }
+.item { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:11px 12px; border-top:1px solid #0b2a31; }
+.item:first-child { border-top:0; }
+.item .n { font-weight:600; }
+.item .s { font-size:12px; color:var(--dim); }
+.item .v { text-align:right; white-space:nowrap; }
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:var(--dim); vertical-align:middle; }
+.dot.on { background:var(--up); } .dot.off { background:var(--down); }
+.tick { font-weight:700; }
+.score { font-size:12px; padding:2px 7px; border-radius:10px; background:#0b2a31; color:var(--cyan); }
+.err { color:var(--warn); font-size:13px; padding:10px 12px; }
+button, a.btn { display:block; width:100%; text-align:center; background:transparent; color:var(--cyan); border:1px solid var(--cyan); border-radius:10px; padding:11px; font-size:14px; margin-top:10px; text-decoration:none; }
+pre { white-space:pre-wrap; font:12px/1.5 ui-monospace, Menlo, Consolas, monospace; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0 0; }
+.note { font-size:11px; color:var(--dim); text-align:center; margin-top:16px; }
+</style>
+</head>
+<body>
+<header><h1>TRADING</h1><span class="upd" id="upd">loading…</span></header>
+
+<section class="hero" id="hero"><div class="k">All paper bots</div><div class="big">–</div></section>
+
+<div id="alerts"></div>
+
+<h2>Bots</h2>
+<div class="card" id="bots"></div>
+
+<h2>Watch (gappers 4–5 of 5)</h2>
+<div class="card" id="watch"></div>
+
+<h2>Today's signals</h2>
+<div class="card" id="signals"></div>
+
+<h2>Daily report</h2>
+<button id="showRep" type="button">Show latest report</button>
+<pre id="rep" hidden></pre>
+
+<a class="btn" href="/trading/">Full Command Center (PC view)</a>
+<p class="note">Paper money only. Refreshes every 30 s.</p>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = x => x == null ? '–' : '$' + Number(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pl = x => x == null ? '<span class="flat">–</span>' : `<span class="${x > 0.005 ? 'up' : x < -0.005 ? 'down' : 'flat'}">${x < 0 ? '-' : '+'}${money(Math.abs(x)).slice(0)}</span>`;
+async function get(u) { const r = await fetch(u, { headers: { 'X-Sarah': '1' }, credentials: 'same-origin' }); if (r.status === 401 || r.redirected) { location.href = '/'; throw new Error('login'); } if (!r.ok) throw new Error(r.status); return r.json(); }
+const etToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
+
+async function load() {
+  let bots, reps, hub = null;
+  try { [bots, reps] = await Promise.all([get('/api/trading/bots'), get('/api/trading/reports')]); }
+  catch (e) { $('upd').textContent = 'offline'; return; }
+  try { hub = await get('/trading/api/state'); } catch (e) { hub = null; }
+  const b = bots.bots || {};
+  const run = Object.fromEntries(((hub && hub.services) || []).map(s => [s.name, s.status === 'running']));
+  const live = {
+    momentum: b.momentum ? b.momentum.account.cash : null,
+    tactical: b.tactical ? (b.tactical.account.equity ?? b.tactical.account.starting_cash) : null,
+    equity: hub && hub.equity ? hub.equity.total_value : (b.equity ? b.equity.account.cash : null),
+    leverage: hub && hub.leverage ? hub.leverage.equity : (b.leverage ? b.leverage.account.cash : null),
+  };
+  const total = Object.values(live).reduce((a, x) => a + (Number(x) || 0), 0);
+  const start = 40000;
+  // "Today" = live total vs the last report from before today (or today's report once it exists)
+  const list = reps.reports || [];
+  const today = etToday();
+  const todayRep = list.find(r => r.day === today);
+  const base = list.find(r => r.day < today);
+  const dayPl = todayRep ? todayRep.summary.day_pl : base ? total - base.summary.value : total - start;
+  $('hero').innerHTML = `<div class="k">All paper bots${hub ? '' : ' (hub offline – saved values)'}</div>
+    <div class="big">${money(total)}</div>
+    <div class="row"><span>Today ${pl(dayPl)}</span><span>Since start ${pl(total - start)}</span></div>`;
+
+  $('alerts').innerHTML = (bots.problems || []).map(t => `<div class="card err" style="margin-bottom:8px">⚠ ${esc(t)}</div>`).join('');
+
+  const rows = [
+    ['Momentum', 'momentum', live.momentum, b.momentum && `${b.momentum.account.open_positions} open · ${b.momentum.account.closed_trades} trades`],
+    ['Tactical', 'tactical', live.tactical, b.tactical && (Object.keys(b.tactical.account.positions || {}).join(', ') || 'cash')],
+    ['Equity AI', 'paperbot', live.equity, hub && hub.equity ? ((hub.equity.positions || []).map(p => p.ticker + ' ×' + p.qty).join(', ') || 'cash') : ''],
+    ['Crypto leverage', 'leverage', live.leverage, hub && hub.leverage ? `${(hub.leverage.open || []).length} open` : ''],
+    ['Telegram', 'telegram', null, 'listening'],
+  ];
+  $('bots').innerHTML = rows.map(([n, svc, v, s]) => `<div class="item"><div><div class="n"><span class="dot ${run[svc] === undefined ? '' : run[svc] ? 'on' : 'off'}"></span>${n}</div><div class="s">${esc(s || '')}</div></div>
+    <div class="v">${v == null ? '' : money(v) + '<div class="s">' + pl(v - 10000) + '</div>'}</div></div>`).join('');
+
+  const g = ((hub && hub.gappers && hub.gappers.rows) || []).filter(r => (r.score || 0) >= 4).slice(0, 5);
+  $('watch').innerHTML = g.length ? g.map(r => `<div class="item"><div><span class="tick">${esc(r.ticker)}</span> <span class="score">${r.score}/5</span>
+      <div class="s">${r.news && r.news.title ? (r.news.sec ? '🏛 ' : '📰 ') + esc(r.news.title) : 'no news'}</div></div>
+      <div class="v">$${Number(r.price).toFixed(2)}<div class="s up">+${Number(r.chg).toFixed(1)}%</div></div></div>`).join('')
+    : '<div class="err" style="color:var(--dim)">Nothing at 4/5 right now. Pre-market scan from 4 AM ET.</div>';
+
+  const tday = new Date().toISOString().slice(0, 10);
+  const sig = (hub && hub.signals) || {};
+  const tk = (sig.tickers || []).filter(s => (s.received_at || '').slice(0, 10) === tday).map(s => s.ticker);
+  const cr = (sig.leverage || []).filter(s => (s.received_at || s.ts || '').slice(0, 10) === tday).map(s => (s.side || '').toUpperCase() + ' ' + s.symbol);
+  const fx = ((bots.fx_journal && bots.fx_journal.last) || []).filter(s => (s.ts || '').slice(0, 10) === tday).map(s => (s.side || '').toUpperCase() + ' ' + s.symbol);
+  $('signals').innerHTML = `<div class="item"><div class="n">Stocks</div><div class="v s">${esc(tk.join(', ') || 'none')}</div></div>
+    <div class="item"><div class="n">Crypto</div><div class="v s">${esc(cr.join(', ') || 'none')}</div></div>
+    <div class="item"><div class="n">Forex / gold</div><div class="v s">${esc(fx.join(', ') || 'none')} <span class="s">(log only)</span></div></div>`;
+
+  $('upd').textContent = 'updated ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  window._latest = list[0];
+}
+
+$('showRep').onclick = async () => {
+  const pre = $('rep');
+  if (!pre.hidden) { pre.hidden = true; $('showRep').textContent = 'Show latest report'; return; }
+  if (!window._latest) { pre.textContent = 'No report yet. The first one comes on the next weekday at 2:30 PM.'; }
+  else { const d = await get('/api/trading/reports/' + window._latest.id); pre.textContent = d.body; }
+  pre.hidden = false; $('showRep').textContent = 'Hide report';
+};
+load();
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+</script>
+</body>
+</html>

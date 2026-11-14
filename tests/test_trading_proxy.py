@@ -86,6 +86,12 @@ class TradingProxy(unittest.TestCase):
             self.assertEqual(self.req(p, "POST", origin=self.base, data=b"{}")[0], 403, p)
         self.assertEqual(len(HITS), before)
 
+    def test_phone_view(self):
+        self.assertEqual(self.req("/trading-m", cookie=False)[0], 302)
+        code, body, _ = self.req("/trading-m")
+        self.assertEqual(code, 200)
+        self.assertIn(b"<title>Trading (phone)</title>", body)
+
     def test_post_needs_sarah_origin(self):
         self.assertEqual(self.req("/trading/api/service/gappers/restart", "POST", origin="https://evil.example", data=b"")[0], 403)
         code, body, _ = self.req("/trading/api/service/gappers/restart", "POST", origin=self.base, data=b"")
