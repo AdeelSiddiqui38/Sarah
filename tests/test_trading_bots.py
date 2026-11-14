@@ -57,6 +57,19 @@ class Bots(unittest.TestCase):
         self.assertTrue(any(r.startswith("bots:momentum-silent") for r, _ in tb.problems(tb.status(str(self.folder), inside), inside)))
         self.assertEqual(tb.problems(tb.status(str(self.folder), outside), outside), [])
 
+    def test_equity_leverage_and_fx_journal(self):
+        write(self.d, "portfolio.json", {"cash": 8609.38, "starting_cash": 10000.0, "positions": {"NVDA": {"qty": 6, "avg_price": 231.77}},
+              "trades": [{"ticker": "NVDA", "action": "buy", "qty": 6, "price": 231.77}]})
+        write(self.d, "leverage_portfolio.json", {"cash": 9990.0, "starting_cash": 10000.0, "open_positions": [{"symbol": "SOL/USDT", "side": "short", "leverage": 20}],
+              "closed_trades": [{"pnl": -10.0}]})
+        write(self.d, "telegram_listener.log", "[x] Listening on channels\n")
+        write(self.d, "fx_signals.json", [{"symbol": "XAUUSD", "side": "long", "channel": "FX Culture"}])
+        st = tb.status(str(self.folder))
+        self.assertEqual(st["bots"]["equity"]["account"]["holds"], {"NVDA": 6})
+        self.assertEqual((st["bots"]["leverage"]["account"]["open_positions"], st["bots"]["leverage"]["account"]["realized"]), (1, -10.0))
+        self.assertEqual(st["bots"]["telegram"]["recent_log"], ["[x] Listening on channels"])
+        self.assertEqual(st["fx_journal"]["count"], 1)
+
     def test_missing_folder(self):
         st = tb.status("/nope")
         self.assertFalse(st["found"])
