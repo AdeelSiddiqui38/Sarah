@@ -24,6 +24,8 @@ BOTS = {
     "telegram": {"label": "Telegram listener", "portfolio": None, "log": "telegram_listener.log"},
 }
 FX_JOURNAL = "fx_signals.json"
+# Risk limits (defaults borrowed from trader-risk in github.com/jakeschincariol/trader-skill, MIT)
+RISK = {"max_position_pct": 25.0, "cash_buffer_pct": 10.0, "momentum_max_daily_loss": 20.0}
 MOMENTUM_WINDOW = (dtime(7, 0), dtime(11, 30))   # ET, weekdays: the bot scans about every 5 minutes
 SILENT_MINUTES = 30
 
@@ -143,6 +145,34 @@ def status(folder, now=None):
     return out
 
 
+def risk_check(folder, st):
+    """Journal & Risk agent: compare the paper accounts with the risk limits. Returns [(ref, text)]."""
+    out = []
+    prices = (_read(Path(folder or "") / "trading-hub" / "logs" / "prices.json") or {}).get("equity") or {}
+    pf = _read(bot_dir(folder) / "portfolio.json") or {}
+    pos = pf.get("positions") or {}
+    cash = _num(pf.get("cash")) or 0.0
+    values = {}
+    for t, p in pos.items():
+        px = _num(prices.get(t)) or _num(p.get("avg_price")) or 0.0
+        values[t] = px * (_num(p.get("qty")) or 0)
+    total = cash + sum(values.values())
+    if total > 0:
+        for t, v in values.items():
+            pct = v / total * 100
+            if pct > RISK["max_position_pct"]:
+                out.append((f"risk:equity-position:{t}", f"Equity paper bot: {t} is {pct:.0f}% of the account "
+                            f"(limit {RISK['max_position_pct']:.0f}%)."))
+        if pos and cash / total * 100 < RISK["cash_buffer_pct"]:
+            out.append(("risk:equity-cash", f"Equity paper bot: cash is {cash / total * 100:.0f}% of the account "
+                        f"(buffer {RISK['cash_buffer_pct']:.0f}%)."))
+    day = (st.get("bots", {}).get("momentum", {}).get("account") or {}).get("day") or {}
+    if day.get("realized") is not None and day["realized"] <= -RISK["momentum_max_daily_loss"]:
+        out.append((f"risk:momentum-loss:{day.get('date')}", f"Momentum paper bot hit its max daily loss on {day.get('date')} "
+                    f"(${day['realized']:.2f}); it stops trading for the day."))
+    return out
+
+
 def problems(st, now=None):
     """What the Trading Supervisor should alert on. Returns [(ref, text)]; empty when all is well."""
     now = now or datetime.now(timezone.utc)
@@ -150,6 +180,10 @@ def problems(st, now=None):
     out = []
     if not st.get("found"):
         return [("bots:folder", "The trading-paperbot folder is missing from the company folder.")]
+    try:
+        out += risk_check(str(Path(st["folder"]).parent), st)
+    except Exception:  # noqa: BLE001  (a risk read error must not hide the health checks)
+        pass
     m = st["bots"]["momentum"]
     in_window = et.weekday() < 5 and MOMENTUM_WINDOW[0] <= et.time() <= MOMENTUM_WINDOW[1]
     if in_window and (m["minutes_since_log"] is None or m["minutes_since_log"] > SILENT_MINUTES):
