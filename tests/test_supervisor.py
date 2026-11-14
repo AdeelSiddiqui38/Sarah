@@ -139,6 +139,22 @@ class Wiring(unittest.TestCase):
             self.assertTrue(next(a for a in view[co]["agents"] if a["name"] == "Email")["role"])
         self.assertFalse(next(a for a in view["APEX Physio"]["agents"] if a["name"] == "Email")["on"])
 
+    def test_trading_has_only_trading_agents(self):
+        sc.q("INSERT INTO projects (slot,name,relevance,folder,agents,created) VALUES (?,?,?,?,?,?)",
+             (3, "Trading Command Center", "Paper", self.tmp.name, "{}", sc.now()))
+        t = sc.find_project("Trading Command Center")
+        names = sc.agents_for(t)
+        self.assertIn("Gappers Scanner", names)
+        for generic in ("Finance", "Email", "Website", "HR", "Marketing"):
+            self.assertNotIn(generic, names)
+        self.assertEqual(sc.agents_for(self.apex), sc.AGENTS)
+        view = {c["company"]: c for c in sc.supervisor_view()}
+        tv = view["Trading Command Center"]["agents"]
+        self.assertEqual([a["name"] for a in tv], names)
+        self.assertIn("bigdata-com:bigdata-screen", next(a for a in tv if a["name"] == "Gappers Scanner")["skills"])
+        self.assertTrue(sv.check_draft("Trading Command Center", "Gappers", "Top 5 gappers with news")["ok"])
+        self.assertFalse(sv.check_draft("Trading Command Center", "X", "Ask Remedy Pills")["ok"])
+
     def test_old_database_gets_new_columns(self):
         sc.CON.close()
         con = sqlite3.connect(sc.DB_PATH)
