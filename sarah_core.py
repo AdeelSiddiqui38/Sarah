@@ -128,7 +128,8 @@ def init_db():
             """
         )
         # Supervisor columns on older databases (P4: company and approver on every record)
-        for t, col in (("audit", "company TEXT"), ("drafts", "review TEXT"), ("drafts", "decided_by TEXT")):
+        for t, col in (("audit", "company TEXT"), ("drafts", "review TEXT"), ("drafts", "decided_by TEXT"),
+                       ("projects", "links TEXT NOT NULL DEFAULT '[]'")):
             try:
                 CON.execute(f"ALTER TABLE {t} ADD COLUMN {col}")
             except sqlite3.OperationalError:
@@ -260,7 +261,27 @@ def valid_session(tok):
 def project_row(p):
     p = dict(p)
     p["agents"] = json.loads(p.get("agents") or "{}")
+    try:
+        p["links"] = json.loads(p.get("links") or "[]")
+    except ValueError:
+        p["links"] = []
     return p
+
+
+def clean_links(raw):
+    """Validate a project's quick links: up to 8 {label, url} pairs, http(s) only."""
+    out = []
+    for item in (raw if isinstance(raw, list) else [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "")).strip()[:40]
+        url = str(item.get("url", "")).strip()[:500]
+        if not url:
+            continue
+        if not re.match(r"https?://[^\s<>\"']+$", url):
+            raise ValueError(f"Not a web link: {url[:60]}")
+        out.append({"label": label or url, "url": url})
+    return out
 
 
 def list_projects():
@@ -1406,7 +1427,7 @@ class H(BaseHTTPRequestHandler):
                 setting("mkt_open_items", json.dumps([str(i)[:200] for i in b["open_items"]][:30]))
             audit("adeel", "marketing_settings", {k: b[k] for k in ("google_posting", "offer_end") if k in b})
             return self.send(200, {"ok": True})
-        m = re.fullmatch(r"/api/projects/(\d+)/(agent|delete|folder)", path)
+        m = re.fullmatch(r"/api/projects/(\d+)/(agent|delete|folder|links)", path)
         if m:
             p = q("SELECT * FROM projects WHERE id=?", (int(m.group(1)),), one=True)
             if not p:
@@ -1416,6 +1437,14 @@ class H(BaseHTTPRequestHandler):
                 q("UPDATE projects SET folder=? WHERE id=?", (folder, p["id"]))
                 audit("adeel", "project_folder_changed", {"name": p["name"], "folder": folder})
                 return self.send(200, {"ok": True, "folder": folder})
+            if m.group(2) == "links":
+                try:
+                    links = clean_links(b.get("links"))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e)})
+                q("UPDATE projects SET links=? WHERE id=?", (json.dumps(links), p["id"]))
+                audit("adeel", "project_links_changed", {"name": p["name"], "links": [l["url"] for l in links]})
+                return self.send(200, {"ok": True, "links": links})
             if m.group(2) == "delete":
                 q("DELETE FROM projects WHERE id=?", (p["id"],))
                 audit("adeel", "project_removed", {"name": p["name"]})
